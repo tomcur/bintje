@@ -1,6 +1,6 @@
 <div align="center">
 
-# Bintje
+# Bintje 🥔
 
 **An experimental renderer**
 
