@@ -1,0 +1,16 @@
+[package]
+name = "bintje"
+description = "An experimental renderer"
+publish = false
+
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bytemuck = { workspace = true }
+color = { workspace = true }
+kurbo = { workspace = true }
+peniko = { workspace = true }
+image = { workspace = true }
