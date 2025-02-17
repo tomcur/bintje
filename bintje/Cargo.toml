@@ -11,6 +11,7 @@ rust-version.workspace = true
 [dependencies]
 bytemuck = { workspace = true }
 color = { workspace = true }
+flatten = { workspace = true }
 image = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }

@@ -190,10 +190,19 @@ impl Bintje {
         style: &kurbo::Stroke,
         brush: impl Into<peniko::BrushRef<'b>>,
     ) {
-        self.fill_shape(
-            kurbo::stroke(path, style, &kurbo::StrokeOpts::default(), 0.1),
-            brush,
-        );
+        self.lines.clear();
+        self.tiles.clear();
+        self.strips.clear();
+        let lines: flatten::stroke::LoweredPath<kurbo::Line> =
+            flatten::stroke::stroke_undashed(path, style, 0.25);
+        for line in lines.path {
+            self.lines.push(Line {
+                p0: line.p0.into(),
+                p1: line.p1.into(),
+            });
+        }
+        self.strip();
+        self.widen(brush);
     }
 
     /// Get the generated draw commands.

@@ -66,6 +66,10 @@ bintje = { version = "0.1.0", path = "bintje" }
 
 bytemuck = "1.21.0"
 color = { version = "0.2.3", features = ["bytemuck"] }
-kurbo = { git = "https://github.com/linebender/kurbo.git", rev = "4982e13cb25332b00bb6ed87f25b535f46a06e12" }
+flatten = { git = "https://github.com/linebender/gpu-stroke-expansion-paper.git", rev = "827ccf6766179340a83f2de3417b7bdd8743706a" }
+kurbo = { version = "0.11.1" }
 peniko = "0.3.1"
 image = { version = "0.25.5", features = ["png"] }
+
+[patch.crates-io]
+kurbo = { git = "https://github.com/linebender/kurbo.git", rev = "4982e13cb25332b00bb6ed87f25b535f46a06e12" }
