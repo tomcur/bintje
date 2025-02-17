@@ -171,85 +171,83 @@ pub fn cpu_rasterize(
     let mut wide_tile_idx = 0;
     for wide_tile_y in 0..height.div_ceil(Tile::HEIGHT) {
         for wide_tile_x in 0..width.div_ceil(WIDE_TILE_WIDTH_PX) {
-            // Debug-render a wide tile checkerboard backdrop
-            let dark_wide_tile = (wide_tile_y & 1) != (wide_tile_x & 1);
-
             let wide_tile = &wide_tiles[wide_tile_idx];
             wide_tile_idx += 1;
 
-            for y in 0..Tile::HEIGHT {
-                let img_y = wide_tile_y * Tile::HEIGHT + y;
+            let mut scratch =
+                [PremulRgba8::from_u32(0); WIDE_TILE_WIDTH_PX as usize * Tile::HEIGHT as usize];
 
-                for x in 0..WIDE_TILE_WIDTH_TILES * Tile::WIDTH {
-                    let img_x = wide_tile_x * WIDE_TILE_WIDTH_PX + x;
-                    let img_idx = img_y as usize * width as usize + img_x as usize;
-
-                    if img_y >= height || img_x >= width {
-                        continue;
-                    }
-
-                    if dark_wide_tile {
-                        img[img_idx] = PremulRgba8 {
-                            r: 220,
-                            g: 220,
-                            b: 200,
-                            a: 255,
-                        };
-                    } else {
-                        img[img_idx] = PremulRgba8 {
-                            r: 240,
-                            g: 240,
-                            b: 220,
-                            a: 255,
-                        };
-                    }
-                }
+            // Debug-render a wide tile checkerboard backdrop
+            let dark_wide_tile = (wide_tile_y & 1) != (wide_tile_x & 1);
+            if dark_wide_tile {
+                scratch.fill(PremulRgba8 {
+                    r: 220,
+                    g: 220,
+                    b: 200,
+                    a: 255,
+                });
+            } else {
+                scratch.fill(PremulRgba8 {
+                    r: 240,
+                    g: 240,
+                    b: 220,
+                    a: 255,
+                });
             }
 
             for command in wide_tile.commands.iter() {
                 match command {
                     Command::Sample(sample) => {
                         for y in 0..Tile::HEIGHT {
-                            let img_y = wide_tile_y * Tile::HEIGHT + y;
+                            // let img_y = wide_tile_y * Tile::HEIGHT + y;
+                            let mut idx = y as usize * WIDE_TILE_WIDTH_PX as usize
+                                + (sample.x * Tile::WIDTH) as usize;
 
                             for x in 0..sample.width * Tile::WIDTH {
-                                let img_x =
-                                    sample.x * Tile::WIDTH + wide_tile_x * WIDE_TILE_WIDTH_PX + x;
-
-                                if img_y >= height || img_x >= width {
-                                    continue;
-                                }
-
-                                let img_idx = img_y as usize * width as usize + img_x as usize;
                                 let alpha_idx = sample.alpha_idx as usize
                                     + x as usize * Tile::HEIGHT as usize
                                     + y as usize;
                                 let composite_color =
                                     mul_alpha(sample.color, alpha_masks[alpha_idx]);
-                                img[img_idx] = over(img[img_idx], composite_color);
+                                scratch[idx] = over(scratch[idx], composite_color);
+                                idx += 1;
                             }
                         }
                     }
                     Command::SparseFill(sparse_fill) => {
                         for y in 0..Tile::HEIGHT {
-                            let img_y = wide_tile_y * Tile::HEIGHT + y;
+                            let mut idx = y as usize * WIDE_TILE_WIDTH_PX as usize
+                                + (sparse_fill.x * Tile::WIDTH) as usize;
 
-                            for x in 0..sparse_fill.width * Tile::WIDTH {
-                                let img_x = sparse_fill.x * Tile::WIDTH
-                                    + wide_tile_x * WIDE_TILE_WIDTH_PX
-                                    + x;
-
-                                if img_y >= height || img_x >= width {
-                                    continue;
-                                }
-
-                                let img_idx = img_y as usize * width as usize + img_x as usize;
-                                img[img_idx] = over(img[img_idx], sparse_fill.color);
+                            // TODO(Tom): if opaque color, do a memset.
+                            for _ in 0..sparse_fill.width * Tile::WIDTH {
+                                scratch[idx] = over(scratch[idx], sparse_fill.color);
+                                idx += 1;
                             }
                         }
                     }
                     _ => {}
                 }
+            }
+
+            let mut img_y = wide_tile_y * Tile::HEIGHT;
+            for y in 0..Tile::HEIGHT {
+                let mut img_x = wide_tile_x * WIDE_TILE_WIDTH_PX;
+                let mut img_idx = img_y as usize * width as usize + img_x as usize;
+                if img_y >= height {
+                    break;
+                }
+                for x in 0..WIDE_TILE_WIDTH_PX {
+                    if img_x >= width {
+                        break;
+                    }
+                    img[img_idx] = scratch[y as usize * WIDE_TILE_WIDTH_PX as usize + x as usize];
+
+                    img_x += 1;
+                    img_idx += 1;
+                }
+
+                img_y += 1;
             }
         }
     }
