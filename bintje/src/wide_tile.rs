@@ -6,7 +6,7 @@ use peniko::{
 use crate::{Strip, Tile};
 
 /// Number of tiles per wide tile.
-pub(crate) const WIDE_TILE_WIDTH_TILES: u16 = 16;
+pub(crate) const WIDE_TILE_WIDTH_TILES: u16 = 32;
 
 /// Number of pixels per wide tile.
 pub(crate) const WIDE_TILE_WIDTH_PX: u16 = Tile::WIDTH * WIDE_TILE_WIDTH_TILES;
