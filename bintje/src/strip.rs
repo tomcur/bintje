@@ -137,10 +137,10 @@ pub(crate) fn generate_strips(
         for y_idx in 0..Tile::HEIGHT {
             let y = y_idx as f32;
 
-            let sign = if p1_y <= p0_y { 1. } else { -1. };
+            let sign = (p0_y - p1_y).signum();
 
-            let y0 = p0_y.clamp(y, y + 1.);
-            let y1 = p1_y.clamp(y, y + 1.);
+            let y0 = p0_y.max(y).min(y + 1.);
+            let y1 = p1_y.max(y).min(y + 1.);
 
             let ymin = f32::min(y0, y1);
             let ymax = f32::max(y0, y1);
@@ -154,8 +154,8 @@ pub(crate) fn generate_strips(
                 let x = x_idx as f32;
 
                 // Find the y-delta that happened within this pixel. Accumulate it forward.
-                let y_left = (p0_y + (x - p0_x) * y_slope).clamp(ymin, ymax);
-                let y_right = (p0_y + (x + 1. - p0_x) * y_slope).clamp(ymin, ymax);
+                let y_left = (p0_y + (x - p0_x) * y_slope).max(ymin).min(ymax);
+                let y_right = (p0_y + (x + 1. - p0_x) * y_slope).max(ymin).min(ymax);
 
                 // Find the trapezoidal area within this pixel
                 let y_left_x = p0_x + (y_left - p0_y) * x_slope;
