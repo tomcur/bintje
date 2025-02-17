@@ -236,19 +236,34 @@ impl Bintje {
         style: &kurbo::Stroke,
         brush: impl Into<peniko::BrushRef<'b>>,
     ) {
-        self.lines.clear();
-        self.tiles.clear();
-        self.strips.clear();
-        let lines: flatten::stroke::LoweredPath<kurbo::Line> =
-            flatten::stroke::stroke_undashed(path, style, 0.25 / self.current_scale);
-        for line in lines.path {
-            self.lines.push(Line {
-                p0: (self.current_transform * line.p0).into(),
-                p1: (self.current_transform * line.p1).into(),
-            });
+        // Whether to use Kurbo's stroke expansion, or the experimental GPU stroke expansion
+        // paper's expansion.
+        const KURBO_STROKE_EXPANSION: bool = false;
+
+        if KURBO_STROKE_EXPANSION {
+            self.fill_shape(
+                kurbo::stroke(
+                    path,
+                    style,
+                    &kurbo::StrokeOpts::default(),
+                    0.25 / self.current_scale,
+                ),
+                brush,
+            );
+        } else {
+            self.lines.clear();
+            self.tiles.clear();
+            self.strips.clear();
+            let lines: flatten::stroke::LoweredPath<kurbo::Line> =
+                flatten::stroke::stroke_undashed(path, style, 0.25 / self.current_scale);
+            for line in lines.path {
+                self.lines
+                    .push(Line::from_kurbo(self.current_transform * line));
+            }
+            self.tile();
+            self.strip();
+            self.widen(brush);
         }
-        self.strip();
-        self.widen(brush);
     }
 
     /// Get the generated draw commands.
