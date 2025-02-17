@@ -162,6 +162,8 @@ pub fn cpu_rasterize(
     alpha_masks: &[u8],
     wide_tiles: &[WideTile],
 ) {
+    const PRINT_CHECKERBOARD: bool = false;
+
     assert_eq!(img.len(), width as usize * height as usize);
     assert_eq!(
         wide_tiles.len(),
@@ -180,22 +182,24 @@ pub fn cpu_rasterize(
             let mut scratch =
                 [PremulRgba8::from_u32(0); WIDE_TILE_WIDTH_PX as usize * Tile::HEIGHT as usize];
 
-            // Debug-render a wide tile checkerboard backdrop
-            let dark_wide_tile = (wide_tile_y & 1) != (wide_tile_x & 1);
-            if dark_wide_tile {
-                scratch.fill(PremulRgba8 {
-                    r: 220,
-                    g: 220,
-                    b: 200,
-                    a: 255,
-                });
-            } else {
-                scratch.fill(PremulRgba8 {
-                    r: 240,
-                    g: 240,
-                    b: 220,
-                    a: 255,
-                });
+            if PRINT_CHECKERBOARD {
+                // Debug-render a wide tile checkerboard backdrop
+                let dark_wide_tile = (wide_tile_y & 1) != (wide_tile_x & 1);
+                if dark_wide_tile {
+                    scratch.fill(PremulRgba8 {
+                        r: 220,
+                        g: 220,
+                        b: 200,
+                        a: 255,
+                    });
+                } else {
+                    scratch.fill(PremulRgba8 {
+                        r: 240,
+                        g: 240,
+                        b: 220,
+                        a: 255,
+                    });
+                }
             }
 
             for command in wide_tile.commands.iter() {
