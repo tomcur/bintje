@@ -168,9 +168,12 @@ pub fn cpu_rasterize(
         width.div_ceil(WIDE_TILE_WIDTH_PX) as usize * height.div_ceil(Tile::HEIGHT) as usize
     );
 
+    let wide_tile_rows = height.div_ceil(Tile::HEIGHT);
+    let wide_tile_columns = width.div_ceil(WIDE_TILE_WIDTH_PX);
+
     let mut wide_tile_idx = 0;
-    for wide_tile_y in 0..height.div_ceil(Tile::HEIGHT) {
-        for wide_tile_x in 0..width.div_ceil(WIDE_TILE_WIDTH_PX) {
+    for wide_tile_y in 0..wide_tile_rows {
+        for wide_tile_x in 0..wide_tile_columns {
             let wide_tile = &wide_tiles[wide_tile_idx];
             wide_tile_idx += 1;
 
@@ -242,14 +245,22 @@ pub fn cpu_rasterize(
                 if img_y >= height {
                     break;
                 }
-                for x in 0..WIDE_TILE_WIDTH_PX {
-                    if img_x >= width {
-                        break;
-                    }
-                    img[img_idx] = scratch[y as usize * WIDE_TILE_WIDTH_PX as usize + x as usize];
+                if wide_tile_x + 1 < wide_tile_columns {
+                    let scratch_idx = y as usize * WIDE_TILE_WIDTH_PX as usize;
+                    img[img_idx..img_idx + WIDE_TILE_WIDTH_PX as usize].copy_from_slice(
+                        &scratch[scratch_idx..scratch_idx + WIDE_TILE_WIDTH_PX as usize],
+                    );
+                } else {
+                    for x in 0..WIDE_TILE_WIDTH_PX {
+                        if img_x >= width {
+                            break;
+                        }
+                        img[img_idx] =
+                            scratch[y as usize * WIDE_TILE_WIDTH_PX as usize + x as usize];
 
-                    img_x += 1;
-                    img_idx += 1;
+                        img_x += 1;
+                        img_idx += 1;
+                    }
                 }
 
                 img_y += 1;
