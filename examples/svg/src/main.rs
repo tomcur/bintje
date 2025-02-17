@@ -27,7 +27,7 @@ pub fn main() {
         (svg.size.height * scale).ceil() as u16,
     );
 
-    encode_svg(&mut renderer, Affine::IDENTITY, &svg.items);
+    encode_svg(&mut renderer, 1. / scale, Affine::IDENTITY, &svg.items);
 
     let commands = renderer.commands();
     let (width, height) = renderer.size();
@@ -57,7 +57,7 @@ pub fn main() {
         .unwrap();
 }
 
-fn encode_svg(renderer: &mut Bintje, transform: Affine, items: &[Item]) {
+fn encode_svg(renderer: &mut Bintje, scale_recip: f64, transform: Affine, items: &[Item]) {
     renderer.push_transform(transform);
     for item in items {
         match item {
@@ -68,14 +68,14 @@ fn encode_svg(renderer: &mut Bintje, transform: Affine, items: &[Item]) {
                 renderer.stroke(
                     &stroke.path,
                     &kurbo::Stroke {
-                        width: stroke.width,
+                        width: stroke.width * scale_recip,
                         ..kurbo::Stroke::default()
                     },
                     stroke.color,
                 );
             }
             Item::Group(group) => {
-                encode_svg(renderer, transform * group.affine, &group.children);
+                encode_svg(renderer, scale_recip, group.affine, &group.children);
             }
         }
     }
