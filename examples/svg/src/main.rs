@@ -2,9 +2,12 @@
 
 use std::path::Path;
 
-use bintje::Bintje;
+use image::ImageEncoder;
 use kurbo::Affine;
+use peniko::color::PremulRgba8;
 use pico_svg::Item;
+
+use bintje::{cpu_rasterize, Bintje};
 
 pub mod pico_svg;
 
@@ -26,13 +29,32 @@ pub fn main() {
 
     encode_svg(&mut renderer, Affine::IDENTITY, &svg.items);
 
+    let commands = renderer.commands();
+    let (width, height) = renderer.size();
+    let mut img = vec![PremulRgba8::from_u32(0); width as usize * height as usize];
+    cpu_rasterize(
+        width,
+        height,
+        &mut img,
+        commands.alpha_masks,
+        commands.wide_tiles,
+    );
+
     let file = std::fs::OpenOptions::new()
         .create(true)
         .truncate(true)
         .write(true)
         .open("test.png")
         .unwrap();
-    renderer.to_png(file).unwrap();
+    let encoder = image::codecs::png::PngEncoder::new(file);
+    encoder
+        .write_image(
+            bytemuck::cast_slice(&img),
+            width as u32,
+            height as u32,
+            image::ExtendedColorType::Rgba8,
+        )
+        .unwrap();
 }
 
 fn encode_svg(renderer: &mut Bintje, transform: Affine, items: &[Item]) {

@@ -229,31 +229,3 @@ pub(crate) fn generate_tiles(line: Line, mut callback: impl FnMut(Tile)) {
         last_z = z;
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn foo() {
-        let mut render = crate::Bintje::new(300, 225);
-        render.fill_shape(
-            kurbo::Rect::new(30., 20., 195., 205.),
-            peniko::color::palette::css::BLUE.with_alpha(1.0),
-        );
-        render.fill_shape(
-            kurbo::Triangle::new((50., 185.), (120., 35.), (185., 175.)),
-            peniko::color::palette::css::GREEN.with_alpha(1.0),
-        );
-        render.fill_shape(
-            kurbo::Circle::new((80., 80.), 70.),
-            peniko::color::palette::css::RED.with_alpha(0.5),
-        );
-
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open("test.png")
-            .unwrap();
-        render.to_png(&mut file).unwrap();
-    }
-}

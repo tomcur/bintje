@@ -12,40 +12,39 @@ pub(crate) const WIDE_TILE_WIDTH_TILES: u16 = 16;
 pub(crate) const WIDE_TILE_WIDTH_PX: u16 = Tile::WIDTH * WIDE_TILE_WIDTH_TILES;
 
 #[derive(Debug)]
-pub(crate) enum Command {
-    /// Fill the paint buffer with an opaque color.
-    // Fill(Fill),
-    ///
+pub enum Command {
+    /// A fill sampling from an alpha mask.
     Sample(Sample),
 
-    /// A fill between two strips.
+    /// An opaque fill between two strips.
     SparseFill(SparseFill),
 
-    #[expect(unused, reason = "TODO")]
+    /// TODO(Tom).
     PushClip(()),
-    #[expect(unused, reason = "TODO")]
+    /// TODO(Tom).
     PopClip(()),
 }
 
 #[derive(Debug)]
-pub(crate) struct Sample {
-    /// Offset within the wide tile, in tiles.
-    x: u16,
-    /// The width of the wide tile, in tiles.
-    width: u16,
-    color: PremulRgba8,
-    alpha_idx: u32,
+pub struct Sample {
+    /// The offset within the wide tile, in tiles.
+    pub x: u16,
+    /// The width of the area to be filled, in tiles.
+    pub width: u16,
+    pub color: PremulRgba8,
+    /// The index into the global alpha mask, encoding the pixel coverage of the area to be filled.
+    pub alpha_idx: u32,
 }
 
 #[derive(Debug)]
-pub(crate) struct SparseFill {
-    x: u16,
-    width: u16,
-    color: PremulRgba8,
+pub struct SparseFill {
+    pub x: u16,
+    pub width: u16,
+    pub color: PremulRgba8,
 }
 
 #[derive(Debug)]
-pub(crate) struct WideTile {
+pub struct WideTile {
     pub commands: Vec<Command>,
 }
 
@@ -155,8 +154,8 @@ pub(crate) fn generate_wide_tile_commands<'b>(
     }
 }
 
-/// img is Rgba8
-pub(crate) fn render(
+/// CPU rasterization of draw commands to a pixel buffer.
+pub fn cpu_rasterize(
     width: u16,
     height: u16,
     img: &mut [PremulRgba8],
@@ -222,11 +221,6 @@ pub(crate) fn render(
                                 }
 
                                 let img_idx = img_y as usize * width as usize + img_x as usize;
-                                // let alpha_idx = sample.alpha_idx as usize
-                                //     + y as usize
-                                //         * sample.width as usize
-                                //         * crate::tile::TILE_WIDTH as usize
-                                //     + x as usize;
                                 let alpha_idx = sample.alpha_idx as usize
                                     + x as usize * Tile::HEIGHT as usize
                                     + y as usize;

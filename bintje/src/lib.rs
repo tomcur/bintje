@@ -1,8 +1,6 @@
 //! An experimental renderer.
 
-use image::ImageEncoder;
 use kurbo::{flatten, PathEl};
-use peniko::color;
 use peniko::BrushRef;
 
 mod line;
@@ -11,11 +9,14 @@ mod strip;
 mod tile;
 mod wide_tile;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) use line::Line;
 pub(crate) use point::Point;
 pub(crate) use strip::Strip;
 pub(crate) use tile::Tile;
-pub(crate) use wide_tile::WideTile;
+pub use wide_tile::{cpu_rasterize, WideTile};
 
 /// The main render context.
 pub struct Bintje {
@@ -41,6 +42,17 @@ pub struct Bintje {
     tiles: Vec<Tile>,
     /// Reusable strip scratch buffer.
     strips: Vec<Strip>,
+}
+
+/// Draw commands.
+///
+/// These consist of wide tiles to be rendered, each with a per-wide-tile command list. Draw
+/// commands contain an index into the alpha mask buffer.
+///
+/// TODO(Tom): the name is confusing, as wide tiles also contain commands.
+pub struct Commands<'c> {
+    pub wide_tiles: &'c [WideTile],
+    pub alpha_masks: &'c [u8],
 }
 
 #[derive(Debug)]
@@ -74,6 +86,13 @@ impl Bintje {
             tiles: Vec::with_capacity(256),
             strips: Vec::with_capacity(64),
         }
+    }
+
+    /// The size of the current render context canvas in pixels.
+    ///
+    /// The size is returned as a tuple of `(width, height)`.
+    pub fn size(&self) -> (u16, u16) {
+        (self.width, self.height)
     }
 
     fn flatten_path(&mut self, path: impl kurbo::Shape) {
@@ -177,32 +196,11 @@ impl Bintje {
         );
     }
 
-    /// Rasterize the wide tiles to a PNG.
-    pub fn to_png(&self, w: impl std::io::Write) -> image::ImageResult<()> {
-        let mut img = vec![
-            color::PremulRgba8 {
-                r: 235,
-                g: 235,
-                b: 225,
-                a: 255
-            };
-            self.width as usize * self.height as usize
-        ];
-
-        wide_tile::render(
-            self.width,
-            self.height,
-            &mut img,
-            &self.alpha_masks,
-            &self.wide_tiles,
-        );
-
-        let encoder = image::codecs::png::PngEncoder::new(w);
-        encoder.write_image(
-            bytemuck::cast_slice(&img),
-            self.width as u32,
-            self.height as u32,
-            image::ExtendedColorType::Rgba8,
-        )
+    /// Get the generated draw commands.
+    pub fn commands(&self) -> Commands<'_> {
+        Commands {
+            wide_tiles: &self.wide_tiles,
+            alpha_masks: &self.alpha_masks,
+        }
     }
 }
