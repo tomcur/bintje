@@ -219,10 +219,15 @@ pub fn cpu_rasterize(
                             let mut idx = y as usize * WIDE_TILE_WIDTH_PX as usize
                                 + (sparse_fill.x * Tile::WIDTH) as usize;
 
-                            // TODO(Tom): if opaque color, do a memset.
-                            for _ in 0..sparse_fill.width * Tile::WIDTH {
-                                scratch[idx] = over(scratch[idx], sparse_fill.color);
-                                idx += 1;
+                            if sparse_fill.color.a == 255 {
+                                // Opaque colors do not need compositing.
+                                scratch[idx..idx + (sparse_fill.width * Tile::WIDTH) as usize]
+                                    .fill(sparse_fill.color);
+                            } else {
+                                for _ in 0..sparse_fill.width * Tile::WIDTH {
+                                    scratch[idx] = over(scratch[idx], sparse_fill.color);
+                                    idx += 1;
+                                }
                             }
                         }
                     }
