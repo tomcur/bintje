@@ -159,7 +159,9 @@ impl Bintje {
 
     /// Clear the scene and start again.
     pub fn clear(&mut self) {
-        todo!()
+        for wide_tile in self.wide_tiles.iter_mut() {
+            wide_tile.commands.clear();
+        }
     }
 
     /// Fill a shape defined by `path` with the given `brush` (currently only solid colors are
