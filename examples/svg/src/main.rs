@@ -58,14 +58,15 @@ pub fn main() {
 }
 
 fn encode_svg(renderer: &mut Bintje, transform: Affine, items: &[Item]) {
+    renderer.push_transform(transform);
     for item in items {
         match item {
             Item::Fill(fill) => {
-                renderer.fill_shape(transform * &fill.path, fill.color);
+                renderer.fill_shape(&fill.path, fill.color);
             }
             Item::Stroke(stroke) => {
                 renderer.stroke(
-                    transform * &stroke.path,
+                    &stroke.path,
                     &kurbo::Stroke {
                         width: stroke.width,
                         ..kurbo::Stroke::default()
@@ -78,4 +79,5 @@ fn encode_svg(renderer: &mut Bintje, transform: Affine, items: &[Item]) {
             }
         }
     }
+    renderer.pop_transform();
 }

@@ -109,7 +109,7 @@ fn triangular_stroke() {
 
     let renderer = env.renderer();
     renderer.stroke(
-        kurbo::Triangle::new((8., 4.), (20., 50.), (55., 45.)).path_elements(0.01),
+        kurbo::Triangle::new((8., 4.), (20., 50.), (55., 45.)).path_elements(f64::NAN),
         &kurbo::Stroke {
             width: 3.5,
             ..kurbo::Stroke::default()

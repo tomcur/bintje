@@ -1,6 +1,6 @@
 //! An experimental renderer.
 
-use kurbo::{flatten, PathEl};
+use kurbo::{flatten, Affine, PathEl};
 use peniko::BrushRef;
 
 mod line;
@@ -29,6 +29,10 @@ pub struct Bintje {
     #[expect(unused, reason = "TODO")]
     clip_stack: Vec<ClipState>,
 
+    transform_stack: Vec<Transform>,
+    current_transform: Affine,
+    current_scale: f64,
+
     /// The rendered wide tiles.
     ///
     /// These contain the draw commands, from which rasterization can proceed.
@@ -53,6 +57,11 @@ pub struct Bintje {
 pub struct Commands<'c> {
     pub wide_tiles: &'c [WideTile],
     pub alpha_masks: &'c [u8],
+}
+
+struct Transform {
+    transform: Affine,
+    scale: f64,
 }
 
 #[derive(Debug)]
@@ -80,6 +89,9 @@ impl Bintje {
             width,
             height,
             clip_stack: Vec::with_capacity(16),
+            transform_stack: Vec::with_capacity(16),
+            current_transform: Affine::IDENTITY,
+            current_scale: 1.,
             wide_tiles,
             alpha_masks: Vec::with_capacity(65536),
             lines: Vec::with_capacity(512),
@@ -99,32 +111,37 @@ impl Bintje {
         let mut closed = true;
         let mut start = kurbo::Point::ZERO;
         let mut prev = kurbo::Point::ZERO;
-        flatten(path.path_elements(0.01), 0.01, |path_element| {
-            match path_element {
-                PathEl::MoveTo(point) => {
-                    if !closed {
+        flatten(
+            path.path_elements(0.25 / self.current_scale),
+            0.25 / self.current_scale,
+            |path_element| {
+                let path_element = self.current_transform * path_element;
+                match path_element {
+                    PathEl::MoveTo(point) => {
+                        if !closed {
+                            self.lines
+                                .push(Line::from_kurbo(kurbo::Line::new(prev, start)));
+                            closed = true;
+                        }
+                        start = point;
+                        prev = point;
+                    }
+                    PathEl::LineTo(point) => {
+                        self.lines
+                            .push(Line::from_kurbo(kurbo::Line::new(prev, point)));
+                        prev = point;
+                        closed = false;
+                    }
+                    PathEl::ClosePath => {
                         self.lines
                             .push(Line::from_kurbo(kurbo::Line::new(prev, start)));
                         closed = true;
                     }
-                    start = point;
-                    prev = point;
+                    // `flatten` turns the path into lines.
+                    PathEl::QuadTo(_, _) | PathEl::CurveTo(_, _, _) => unreachable!(),
                 }
-                PathEl::LineTo(point) => {
-                    self.lines
-                        .push(Line::from_kurbo(kurbo::Line::new(prev, point)));
-                    prev = point;
-                    closed = false;
-                }
-                PathEl::ClosePath => {
-                    self.lines
-                        .push(Line::from_kurbo(kurbo::Line::new(prev, start)));
-                    closed = true;
-                }
-                // `flatten` turns the path into lines.
-                PathEl::QuadTo(_, _) | PathEl::CurveTo(_, _, _) => unreachable!(),
-            }
-        });
+            },
+        );
 
         if !closed && prev != start {
             self.lines
@@ -162,6 +179,33 @@ impl Bintje {
         for wide_tile in self.wide_tiles.iter_mut() {
             wide_tile.commands.clear();
         }
+        self.transform_stack.clear();
+        self.current_transform = Affine::IDENTITY;
+        self.current_scale = 1.;
+    }
+
+    /// Push an affine transform. Subsequent commands will have this transform applied.
+    ///
+    /// The transform is combined with the previous transform.
+    pub fn push_transform(&mut self, transform: Affine) {
+        self.transform_stack.push(Transform {
+            transform: self.current_transform,
+            scale: self.current_scale,
+        });
+
+        self.current_transform *= transform;
+        self.current_scale = f64::max(
+            self.current_transform.as_coeffs()[0].abs(),
+            self.current_transform.as_coeffs()[3].abs(),
+        );
+    }
+
+    /// Pop the last-pushed affine transform, returning to the transform before it.
+    pub fn pop_transform(&mut self) {
+        if let Some(prev_transform) = self.transform_stack.pop() {
+            self.current_transform = prev_transform.transform;
+            self.current_scale = prev_transform.scale;
+        }
     }
 
     /// Fill a shape defined by `path` with the given `brush` (currently only solid colors are
@@ -196,11 +240,11 @@ impl Bintje {
         self.tiles.clear();
         self.strips.clear();
         let lines: flatten::stroke::LoweredPath<kurbo::Line> =
-            flatten::stroke::stroke_undashed(path, style, 0.25);
+            flatten::stroke::stroke_undashed(path, style, 0.25 / self.current_scale);
         for line in lines.path {
             self.lines.push(Line {
-                p0: line.p0.into(),
-                p1: line.p1.into(),
+                p0: (self.current_transform * line.p0).into(),
+                p1: (self.current_transform * line.p1).into(),
             });
         }
         self.strip();
