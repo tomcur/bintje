@@ -275,15 +275,41 @@ pub fn cpu_rasterize(
 
 /// Multiply the alpha over a color.
 fn mul_alpha(color: PremulRgba8, alpha: u8) -> PremulRgba8 {
-    (PremulColor::from(color) * (alpha as f32 * (1. / 255.))).to_rgba8()
+    const COMPOSITE_IN_F32: bool = false;
+
+    if COMPOSITE_IN_F32 {
+        (PremulColor::from(color) * (alpha as f32 * (1. / 255.))).to_rgba8()
+    } else {
+        let mut arr = color.to_u8_array();
+        for idx in 0..4 {
+            arr[idx] = ((arr[idx] as u16 * alpha as u16) / 255) as u8;
+        }
+        PremulRgba8::from_u8_array(arr)
+    }
 }
 
 /// Composite one color over another.
 fn over(under: PremulRgba8, over: PremulRgba8) -> PremulRgba8 {
-    let under = PremulColor::from(under);
-    let over = PremulColor::from(over);
+    const COMPOSITE_IN_F32: bool = false;
 
-    let mut composite = over + under * (1. - over.components[3]);
-    composite.components[3] = over.components[3] + under.components[3] * (1. - over.components[3]);
-    composite.to_rgba8()
+    if COMPOSITE_IN_F32 {
+        let under = PremulColor::from(under);
+        let over = PremulColor::from(over);
+
+        let mut composite = over + under * (1. - over.components[3]);
+        composite.components[3] =
+            over.components[3] + under.components[3] * (1. - over.components[3]);
+        composite.to_rgba8()
+    } else {
+        let mut under = under.to_u8_array();
+        let over = over.to_u8_array();
+
+        for idx in 0..3 {
+            under[idx] =
+                ((over[idx] as u16 * 255 + under[idx] as u16 * (255 - over[3]) as u16) / 255) as u8;
+        }
+        under[3] = ((over[3] as u16 * 255 + under[3] as u16 * (255 - over[3] as u16)) / 255) as u8;
+
+        PremulRgba8::from_u8_array(under)
+    }
 }
