@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 bintje.workspace = true
+bintje_wgpu.workspace = true
 
 bytemuck.workspace = true
 image.workspace = true

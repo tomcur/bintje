@@ -8,6 +8,7 @@ use peniko::color::PremulRgba8;
 use pico_svg::Item;
 
 use bintje::{cpu_rasterize, Bintje};
+use bintje_wgpu::RenderContext;
 
 pub mod pico_svg;
 
@@ -26,9 +27,12 @@ pub fn main() {
         (svg.size.width * scale).ceil() as u16,
         (svg.size.height * scale).ceil() as u16,
     );
+    let mut gpu_render_context = bintje_wgpu::block_on(RenderContext::create());
+    let mut fragment_shader = gpu_render_context.rasterizer();
+    let mut rgba8_img = vec![0; 256 * 256 * 4];
 
     let (width, height) = renderer.size();
-    let mut img = vec![PremulRgba8::from_u32(0); width as usize * height as usize];
+    let mut _img = vec![PremulRgba8::from_u32(0); width as usize * height as usize];
     let now = std::time::Instant::now();
     let mut coarse = std::time::Duration::ZERO;
     let mut fine = std::time::Duration::ZERO;
@@ -40,12 +44,18 @@ pub fn main() {
         coarse += start.elapsed();
         start = std::time::Instant::now();
         let commands = renderer.commands();
-        cpu_rasterize(
-            width,
-            height,
-            &mut img,
+        // cpu_rasterize(
+        //     width,
+        //     height,
+        //     &mut img,
+        //     commands.alpha_masks,
+        //     commands.wide_tiles,
+        // );
+        fragment_shader.rasterize(
             commands.alpha_masks,
             commands.wide_tiles,
+            width,
+            &mut rgba8_img,
         );
         fine += start.elapsed();
     }
@@ -91,9 +101,12 @@ pub fn main() {
     let encoder = image::codecs::png::PngEncoder::new(file);
     encoder
         .write_image(
-            bytemuck::cast_slice(&img),
-            width as u32,
-            height as u32,
+            // bytemuck::cast_slice(&img),
+            &rgba8_img,
+            // width as u32,
+            // height as u32,
+            256,
+            256,
             image::ExtendedColorType::Rgba8,
         )
         .unwrap();
