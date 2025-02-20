@@ -15,8 +15,8 @@ mod tests;
 pub(crate) use line::Line;
 pub(crate) use point::Point;
 pub(crate) use strip::Strip;
-pub(crate) use tile::Tile;
-pub use wide_tile::{cpu_rasterize, WideTile};
+pub use tile::Tile;
+pub use wide_tile::{cpu_rasterize, Command, Sample, SparseFill, WideTile};
 
 /// The main render context.
 pub struct Bintje {

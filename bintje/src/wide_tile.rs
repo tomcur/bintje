@@ -48,6 +48,14 @@ pub struct WideTile {
     pub commands: Vec<Command>,
 }
 
+impl WideTile {
+    /// Number of tiles per wide tile.
+    pub const WIDTH_TILES: u16 = WIDE_TILE_WIDTH_TILES;
+
+    /// Number of pixels per wide tile.
+    pub const WIDTH_PX: u16 = WIDE_TILE_WIDTH_PX;
+}
+
 pub(crate) fn generate_wide_tile_commands<'b>(
     width: u16,
     wide_tiles: &mut [WideTile],

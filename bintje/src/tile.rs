@@ -24,23 +24,23 @@ impl TilePoint {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Tile {
+pub struct Tile {
     /// The tile x-coordinate.
-    pub x: u16,
+    pub(crate) x: u16,
     /// The tile y-coordinate.
-    pub y: u16,
+    pub(crate) y: u16,
     /// First point of the line within the tile, packed as two 16-bit floats.
-    pub p0: TilePoint,
+    pub(crate) p0: TilePoint,
     /// Second point of the line within the tile, packed as two 16-bit floats.
-    pub p1: TilePoint,
+    pub(crate) p1: TilePoint,
 }
 
 impl Tile {
     /// Tile width in pixels.
-    pub(crate) const WIDTH: u16 = 4;
+    pub const WIDTH: u16 = 4;
 
     /// Tile height in pixels.
-    pub(crate) const HEIGHT: u16 = 4;
+    pub const HEIGHT: u16 = 4;
 }
 
 impl std::cmp::PartialEq for Tile {
