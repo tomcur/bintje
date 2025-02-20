@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "bintje",
+    "bintje_wgpu",
     
     "examples/svg",
 ]
@@ -63,6 +64,7 @@ rust-version = "1.82"
 
 [workspace.dependencies]
 bintje = { version = "0.1.0", path = "bintje" }
+bintje_wgpu = { version = "0.1.0", path = "bintje_wgpu" }
 
 bytemuck = "1.21.0"
 color = { version = "0.2.3", features = ["bytemuck"] }

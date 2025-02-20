@@ -21,6 +21,24 @@
             (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
             rustfmt
           ];
+
+          shellHook =
+            let
+              libraryPath = with pkgs;
+                lib.strings.makeLibraryPath [
+                  libGL
+                ];
+            in
+            ''
+              RUST_SRC_PATH="${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+              export RUST_LOG="warn,response=trace,response_app=debug,response_view=debug,skimgui=trace";
+              # workaround for npm dep compilation
+              # https://github.com/imagemin/optipng-bin/issues/108
+
+              LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${libraryPath}
+              LD=$CC
+            '';
+
         };
       });
 }
