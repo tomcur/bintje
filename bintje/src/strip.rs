@@ -144,13 +144,15 @@ pub(crate) fn generate_strips(
             let ymin = p_ymin.max(y).min(y + 1.);
             let ymax = p_ymax.max(y).min(y + 1.);
 
-            // let mut y_right = (p0_y - p0_x * y_slope).max(ymin).min(ymax);
-            // let mut y_right_x = p0_x + (y_right - p0_y) * x_slope;
+            let mut y_right = (p0_y - p0_x * y_slope).max(ymin).min(ymax);
+            let mut y_right_x = p0_x + (y_right - p0_y) * x_slope;
 
             let mut acc = 0.;
             // TODO(Tom): reduce operations by taking the previous iteration's `y_right` as the
             // current iteration's `y_next`.
             // 2025-02-17: It appears not to help in the 4x4 case.
+            // 2025-02-18: It actually turns out to be every so slightly faster, but ideally more
+            // principled measurements would be performed.
             //
             // TODO(Tom): does short-circuiting help? e.g., if both x coordinates are to the
             // left of this pixel's right edge, breaking this inner loop?
@@ -159,14 +161,14 @@ pub(crate) fn generate_strips(
                 let x = x_idx as f32;
 
                 // Find the y-delta that happened within this pixel. Accumulate it forward.
-                // let y_left = y_right;
-                let y_left = (p0_y + (x - p0_x) * y_slope).max(ymin).min(ymax);
-                let y_right = (p0_y + (x + 1. - p0_x) * y_slope).max(ymin).min(ymax);
+                let y_left = y_right;
+                // let y_left = (p0_y + (x - p0_x) * y_slope).max(ymin).min(ymax);
+                y_right = (p0_y + (x + 1. - p0_x) * y_slope).max(ymin).min(ymax);
 
                 // Find the trapezoidal area within this pixel
-                // let y_left_x = y_right_x;
-                let y_left_x = p0_x + (y_left - p0_y) * x_slope;
-                let y_right_x = p0_x + (y_right - p0_y) * x_slope;
+                let y_left_x = y_right_x;
+                // let y_left_x = p0_x + (y_left - p0_y) * x_slope;
+                y_right_x = p0_x + (y_right - p0_y) * x_slope;
 
                 let h = (y_left - y_right).abs();
                 let area = 0.5 * h * (x + x + 2. - y_left_x - y_right_x);
