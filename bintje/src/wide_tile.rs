@@ -281,8 +281,8 @@ fn mul_alpha(color: PremulRgba8, alpha: u8) -> PremulRgba8 {
         (PremulColor::from(color) * (alpha as f32 * (1. / 255.))).to_rgba8()
     } else {
         let mut arr = color.to_u8_array();
-        for idx in 0..4 {
-            arr[idx] = ((arr[idx] as u16 * alpha as u16) / 255) as u8;
+        for component in &mut arr {
+            *component = ((*component as u16 * alpha as u16) / 255) as u8;
         }
         PremulRgba8::from_u8_array(arr)
     }
