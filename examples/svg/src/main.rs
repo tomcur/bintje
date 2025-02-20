@@ -27,17 +27,59 @@ pub fn main() {
         (svg.size.height * scale).ceil() as u16,
     );
 
-    encode_svg(&mut renderer, 1. / scale, Affine::IDENTITY, &svg.items);
-
-    let commands = renderer.commands();
     let (width, height) = renderer.size();
     let mut img = vec![PremulRgba8::from_u32(0); width as usize * height as usize];
-    cpu_rasterize(
-        width,
-        height,
-        &mut img,
-        commands.alpha_masks,
-        commands.wide_tiles,
+    let now = std::time::Instant::now();
+    let mut coarse = std::time::Duration::ZERO;
+    let mut fine = std::time::Duration::ZERO;
+    const NUM_ITERATIONS: u16 = 100;
+    for _ in 0..NUM_ITERATIONS {
+        renderer.clear();
+        let mut start = std::time::Instant::now();
+        encode_svg(&mut renderer, 1. / scale, Affine::IDENTITY, &svg.items);
+        coarse += start.elapsed();
+        start = std::time::Instant::now();
+        let commands = renderer.commands();
+        cpu_rasterize(
+            width,
+            height,
+            &mut img,
+            commands.alpha_masks,
+            commands.wide_tiles,
+        );
+        fine += start.elapsed();
+    }
+    println!(
+        "Total elapsed:                  {:?}ms",
+        now.elapsed().as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
+    );
+    println!(
+        "Coarse elapsed:                 {:?}ms",
+        coarse.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
+    );
+    println!(
+        " - Elapsed flattening:          {:?}ms",
+        renderer.flattening_time.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
+    );
+    println!(
+        " - Elapsed flattening (stroke): {:?}ms",
+        renderer.flattening_stroke_time.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
+    );
+    println!(
+        " - Stripping elapsed:           {:?}ms",
+        renderer.strip_generation_time.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
+    );
+    println!(
+        " - Tile generation elapsed:     {:?}ms",
+        renderer.tile_generation_time.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
+    );
+    println!(
+        " - Tile sorting elapsed:        {:?}ms",
+        renderer.tile_sorting_time.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
+    );
+    println!(
+        "Fine elapsed:                   {:?}ms",
+        fine.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
     );
 
     let file = std::fs::OpenOptions::new()

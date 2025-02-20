@@ -46,6 +46,12 @@ pub struct Bintje {
     tiles: Vec<Tile>,
     /// Reusable strip scratch buffer.
     strips: Vec<Strip>,
+
+    pub flattening_time: std::time::Duration,
+    pub flattening_stroke_time: std::time::Duration,
+    pub tile_generation_time: std::time::Duration,
+    pub tile_sorting_time: std::time::Duration,
+    pub strip_generation_time: std::time::Duration,
 }
 
 /// Draw commands.
@@ -97,6 +103,12 @@ impl Bintje {
             lines: Vec::with_capacity(512),
             tiles: Vec::with_capacity(256),
             strips: Vec::with_capacity(64),
+
+            flattening_time: std::time::Duration::ZERO,
+            flattening_stroke_time: std::time::Duration::ZERO,
+            tile_sorting_time: std::time::Duration::ZERO,
+            tile_generation_time: std::time::Duration::ZERO,
+            strip_generation_time: std::time::Duration::ZERO,
         }
     }
 
@@ -111,6 +123,7 @@ impl Bintje {
         let mut closed = true;
         let mut start = kurbo::Point::ZERO;
         let mut prev = kurbo::Point::ZERO;
+        let start_time = std::time::Instant::now();
         flatten(
             path.path_elements(0.25 / self.current_scale),
             0.25 / self.current_scale,
@@ -147,21 +160,28 @@ impl Bintje {
             self.lines
                 .push(Line::from_kurbo(kurbo::Line::new(prev, start)));
         }
+        self.flattening_time += start_time.elapsed();
     }
 
     /// Consume the lines, turning them into tiles.
     fn tile(&mut self) {
+        let start = std::time::Instant::now();
         for line in self.lines.drain(..) {
             tile::generate_tiles(line, |tile| {
                 self.tiles.push(tile);
             });
         }
+        self.tile_generation_time += start.elapsed();
+        let start = std::time::Instant::now();
         self.tiles.sort_unstable();
+        self.tile_sorting_time += start.elapsed();
     }
 
     /// Consume tiles, turning them into strips.
     fn strip(&mut self) {
+        let start = std::time::Instant::now();
         strip::generate_strips(&self.tiles, &mut self.alpha_masks, &mut self.strips);
+        self.strip_generation_time += start.elapsed();
     }
 
     /// Consume strips, turning them into wide tile commands.
@@ -254,12 +274,14 @@ impl Bintje {
             self.lines.clear();
             self.tiles.clear();
             self.strips.clear();
+            let start = std::time::Instant::now();
             let lines: flatten::stroke::LoweredPath<kurbo::Line> =
                 flatten::stroke::stroke_undashed(path, style, 0.25 / self.current_scale);
             for line in lines.path {
                 self.lines
                     .push(Line::from_kurbo(self.current_transform * line));
             }
+            self.flattening_stroke_time += start.elapsed();
             self.tile();
             self.strip();
             self.widen(brush);
