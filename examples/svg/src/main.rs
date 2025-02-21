@@ -4,7 +4,7 @@ use std::path::Path;
 
 use image::ImageEncoder;
 use kurbo::Affine;
-use peniko::color::PremulRgba8;
+use peniko::color::{self, PremulRgba8, Rgba8};
 use pico_svg::Item;
 
 use bintje::{cpu_rasterize, Bintje};
@@ -92,6 +92,7 @@ pub fn main() {
         fine.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
     );
 
+    unpremultiply(&mut img);
     let file = std::fs::OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -107,6 +108,19 @@ pub fn main() {
             image::ExtendedColorType::Rgba8,
         )
         .unwrap();
+}
+
+fn unpremultiply(premultiplied: &mut [PremulRgba8]) {
+    for color in premultiplied {
+        let f_color = color::PremulColor::<color::Srgb>::from(*color);
+        let rgba8 = f_color.un_premultiply().to_rgba8();
+        *color = PremulRgba8 {
+            r: rgba8.r,
+            g: rgba8.g,
+            b: rgba8.b,
+            a: rgba8.a,
+        };
+    }
 }
 
 fn encode_svg(renderer: &mut Bintje, scale_recip: f64, transform: Affine, items: &[Item]) {
