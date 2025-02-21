@@ -1,29 +1,45 @@
 // This shader takes the wide tile commands (and their positions) as vertex
 // instance data. The vertex buffer steps per index.
 
-// The shader is not truly generic over the value here, as the layout of and
-// indexing into `alpha_masks` is directly influenced by it. It's named as a
-// constant mostly for clarity.
+// The shader is not truly generic over the values here, as the layout of and
+// indexing into `alpha_masks` is directly influenced by it. They're named as
+// constants mostly for clarity.
+const TILE_WIDTH: u32 = 4;
 const TILE_HEIGHT: u32 = 4;
 
+// A draw command strip.
 struct Instance {
+    // The draw command origin x-coordinate in pixels.
     @location(0) x: u32,
+    // The draw command origin y-coordinate in pixels.
     @location(1) y: u32,
+    // The width in pixels of the strip (the height is given by `TILE_HEIGHT`).
     @location(2) width: u32,
+    // The starting index into the alpha mask buffer. If this is 0xffff, the
+    // draw is a fill.
     @location(3) alpha_idx: u32,
+    // The color to draw.
     @location(4) color: u32,
 }
 
 struct VertexOutput {
+    // The framebuffer position.
     @builtin(position) pos: vec4<f32>,
+    // The color to draw.
     @location(0) color: vec4<f32>,
+    // The starting index into the alpha mask buffer. If this is 0xffff, the
+    // draw is a fill.
     @location(1) alpha_idx: u32,
+    // The draw command origin x-coordinate in pixels.
     @location(2) x: u32,
+    // The draw command origin y-coordinate in pixels.
     @location(3) y: u32,
 }
 
 struct Config {
+    // The image width in pixels.
     width: u32,
+    // The image height in pixels.
     height: u32,
 }
 
@@ -35,9 +51,13 @@ fn vs(
     @builtin(vertex_index) idx: u32,
     instance: Instance,
 ) -> VertexOutput {
-
-    let x0 = -1 + 2 * f32(instance.x) / f32(config.width);
-    let x1 = -1 + 2 * f32(instance.x + instance.width) / f32(config.width);
+    // TODO(Tom): we shift the vertex to the left here, to undo the shift to
+    // the right done by the tiling. Once tiling stops shifting to the right,
+    // we should stop shifting to the left.
+    // let x0 = -1 + 2 * f32(instance.x) / f32(config.width);
+    // let x1 = -1 + 2 * f32(instance.x + instance.width) / f32(config.width);
+    let x0 = -1 + 2 * (f32(instance.x) - f32(TILE_WIDTH)) / f32(config.width);
+    let x1 = -1 + 2 * (f32(instance.x + instance.width) - f32(TILE_WIDTH)) / f32(config.width);
     let y0 = 1 - 2 * f32(instance.y) / f32(config.height);
     let y1 = 1 - 2 * f32(instance.y + TILE_HEIGHT) / f32(config.height);
     let vertex = array(
@@ -51,7 +71,8 @@ fn vs(
     output.pos = vec4(vertex[idx], 0.0, 1.0);
     output.color = unpack4x8unorm(instance.color);
     output.alpha_idx = instance.alpha_idx;
-    output.x = instance.x;
+    output.x = instance.x - TILE_WIDTH;
+    // output.x = instance.x;
     output.y = instance.y;
     return output;
 }

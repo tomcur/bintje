@@ -5,10 +5,10 @@
 //! This currently hardcodes the texture size to 256x256 pixels.
 
 use color::PremulRgba8;
+use wgpu::util::DeviceExt;
 
 /// Re-export pollster's `block_on` for convenience.
 pub use pollster::block_on;
-use wgpu::util::DeviceExt;
 
 /// Targetting WebGL2.
 const LIMITS: wgpu::Limits = wgpu::Limits::downlevel_webgl2_defaults();

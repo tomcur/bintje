@@ -216,15 +216,19 @@ pub(crate) fn generate_tiles(line: Line, mut callback: impl FnMut(Tile)) {
         debug_assert!(p0.y >= 0.0 && p0.y <= Tile::HEIGHT as f32);
         debug_assert!(p1.x >= 0.0 && p1.x <= Tile::WIDTH as f32);
         debug_assert!(p1.y >= 0.0 && p1.y <= Tile::HEIGHT as f32);
-        let tile = Tile {
-            // The tiles are shifted to the right here, to ensure geometry that is to the left of
-            // the viewport can be accounted for in winding calculations.
-            x: (x + 1).clamp(0, u16::MAX as i32) as u16,
-            y: y.clamp(0, u16::MAX as i32) as u16,
-            p0: TilePoint::from_point(p0),
-            p1: TilePoint::from_point(p1),
-        };
-        callback(tile);
+
+        // Don't output tiles that are above the viewport.
+        if y >= 0 {
+            let tile = Tile {
+                // The tiles are shifted to the right here, to ensure geometry that is to the left of
+                // the viewport can be accounted for in winding calculations.
+                x: (x + 1).clamp(0, u16::MAX as i32) as u16,
+                y: y.clamp(0, u16::MAX as i32) as u16,
+                p0: TilePoint::from_point(p0),
+                p1: TilePoint::from_point(p1),
+            };
+            callback(tile);
+        }
 
         last_z = z;
     }
