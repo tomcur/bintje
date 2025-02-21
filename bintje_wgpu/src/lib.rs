@@ -50,7 +50,9 @@ impl RenderContext {
 
     /// Create the actual rasterizer. Currently this only creates the shader required for
     /// rasterizing draw commands (fills with and without alpha masks).
-    pub fn rasterizer(&mut self) -> Rasterizer {
+    pub fn rasterizer(&mut self, width: u16, height: u16) -> Rasterizer {
+        debug_assert!(width <= 256 && height <= 256);
+
         let draw_shader = self
             .device
             .create_shader_module(wgpu::include_wgsl!("draw_shader.wgsl"));
@@ -58,6 +60,8 @@ impl RenderContext {
         let target_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
+                // width: width.into(),
+                // height: height.into(),
                 width: 256,
                 height: 256,
                 depth_or_array_layers: 1,
@@ -155,7 +159,12 @@ impl RenderContext {
             device: self.device.clone(),
             queue: self.queue.clone(),
             pipeline,
+
+            width,
+            height,
+
             target_texture,
+            texture_copy_buffer: TextureCopyBuffer::new(&self.device, width, height),
 
             bind_group_layout,
             vertex_instance_buffer,
@@ -214,12 +223,43 @@ pub struct Rasterizer {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub pipeline: wgpu::RenderPipeline,
-    // pub encoder: wgpu::CommandEncoder,
+
+    width: u16,
+    height: u16,
+
     target_texture: wgpu::Texture,
+    texture_copy_buffer: TextureCopyBuffer,
 
     bind_group_layout: wgpu::BindGroupLayout,
     vertex_instance_buffer: wgpu::Buffer,
     alpha_masks_buffer: wgpu::Buffer,
+}
+
+/// A buffer to copy textures into from the GPU.
+///
+/// This pads internal buffer to adhere to the `bytes_per_row` size requirement of
+/// [`wgpu::CommandEncoder::copy_texture_to_buffer`], see [`wgpu::TexelCopyBufferLayout`].
+struct TextureCopyBuffer {
+    buffer: wgpu::Buffer,
+    bytes_per_row: u32,
+}
+
+impl TextureCopyBuffer {
+    pub fn new(device: &wgpu::Device, width: u16, height: u16) -> Self {
+        let bytes_per_row = ((width as u32) * 4).next_multiple_of(256);
+
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("texture-out"),
+            size: bytes_per_row as u64 * height as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        Self {
+            buffer,
+            bytes_per_row,
+        }
+    }
 }
 
 impl Rasterizer {
@@ -370,12 +410,6 @@ impl Rasterizer {
             self.submit(encoder, !submitted, &mut instances, &mut alpha_masks_buffer);
         }
 
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: 256 * 256 * 4,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -387,22 +421,24 @@ impl Rasterizer {
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
+                buffer: &self.texture_copy_buffer.buffer,
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(256 * 4),
-                    rows_per_image: Some(256),
+                    // Must be a multiple of 256 bytes.
+                    bytes_per_row: Some(self.texture_copy_buffer.bytes_per_row),
+                    rows_per_image: None,
                 },
             },
             wgpu::Extent3d {
-                width: 256,
-                height: 256,
+                width: self.width.into(),
+                height: self.height.into(),
                 depth_or_array_layers: 1,
             },
         );
         self.queue.submit([encoder.finish()]);
 
-        buffer
+        self.texture_copy_buffer
+            .buffer
             .slice(..)
             .map_async(wgpu::MapMode::Read, move |result| {
                 if result.is_err() {
@@ -411,6 +447,14 @@ impl Rasterizer {
             });
 
         self.device.poll(wgpu::Maintain::Wait);
-        dest_img.copy_from_slice(&buffer.slice(..).get_mapped_range());
+        let mut img_idx = 0;
+        for row in (self.texture_copy_buffer.buffer.slice(..).get_mapped_range())
+            .chunks_exact(self.texture_copy_buffer.bytes_per_row as usize)
+        {
+            dest_img[img_idx..img_idx + self.width as usize * 4]
+                .copy_from_slice(&row[0..self.width as usize * 4]);
+            img_idx += self.width as usize * 4;
+        }
+        self.texture_copy_buffer.buffer.unmap();
     }
 }
