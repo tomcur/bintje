@@ -1,6 +1,11 @@
 // This shader takes the wide tile commands (and their positions) as vertex
 // instance data. The vertex buffer steps per index.
 
+// The shader is not truly generic over the value here, as the layout of and
+// indexing into `alpha_masks` is directly influenced by it. It's named as a
+// constant mostly for clarity.
+const TILE_HEIGHT: u32 = 4;
+
 struct Instance {
     @location(0) x: u32,
     @location(1) y: u32,
@@ -17,15 +22,24 @@ struct VertexOutput {
     @location(3) y: u32,
 }
 
+struct Config {
+    width: u32,
+    height: u32,
+}
+
+@group(0) @binding(0)
+var<uniform> config: Config;
+
 @vertex
 fn vs(
     @builtin(vertex_index) idx: u32,
     instance: Instance,
 ) -> VertexOutput {
-    let x0 = -1 + 2 * f32(instance.x) / 256;
-    let x1 = -1 + 2 * f32(instance.x + instance.width) / 256;
-    let y0 = 1 - 2 * f32(instance.y) / 256;
-    let y1 = 1 - 2 * f32(instance.y + 4) / 256;
+
+    let x0 = -1 + 2 * f32(instance.x) / f32(config.width);
+    let x1 = -1 + 2 * f32(instance.x + instance.width) / f32(config.width);
+    let y0 = 1 - 2 * f32(instance.y) / f32(config.height);
+    let y1 = 1 - 2 * f32(instance.y + TILE_HEIGHT) / f32(config.height);
     let vertex = array(
         vec2(x0, y0),
         vec2(x1, y0),
@@ -42,7 +56,7 @@ fn vs(
     return output;
 }
 
-@group(0) @binding(0)
+@group(0) @binding(1)
 var<uniform> alpha_masks: array<vec4<u32>, 1024>;
 
 struct FragOut {
@@ -55,8 +69,8 @@ fn fs(in: VertexOutput) -> FragOut {
     let in_y = floor(in.pos.y);
 
     var output: FragOut;
-    let alpha_idx = in.alpha_idx + (u32(in_x) - in.x) / 4;
-    let alpha_mask = unpack4x8unorm(alpha_masks[alpha_idx][u32(in_x) % 4]);
+    let alpha_idx = in.alpha_idx + (u32(in_x) - in.x) / TILE_HEIGHT;
+    let alpha_mask = unpack4x8unorm(alpha_masks[alpha_idx][u32(in_x) % TILE_HEIGHT]);
     output.color = (f32(in.alpha_idx == 0xffff) + f32(in.alpha_idx != 0xffff) * alpha_mask[u32(in_y) - in.y]) * in.color;
     return output;
 }

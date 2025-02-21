@@ -8,6 +8,7 @@ use color::PremulRgba8;
 
 /// Re-export pollster's `block_on` for convenience.
 pub use pollster::block_on;
+use wgpu::util::DeviceExt;
 
 /// Targetting WebGL2.
 const LIMITS: wgpu::Limits = wgpu::Limits::downlevel_webgl2_defaults();
@@ -19,6 +20,13 @@ pub struct RenderContext {
     adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct DrawConfig {
+    width: u32,
+    height: u32,
 }
 
 impl RenderContext {
@@ -51,8 +59,6 @@ impl RenderContext {
     /// Create the actual rasterizer. Currently this only creates the shader required for
     /// rasterizing draw commands (fills with and without alpha masks).
     pub fn rasterizer(&mut self, width: u16, height: u16) -> Rasterizer {
-        debug_assert!(width <= 256 && height <= 256);
-
         let draw_shader = self
             .device
             .create_shader_module(wgpu::include_wgsl!("shaders/draw.wgsl"));
@@ -60,10 +66,8 @@ impl RenderContext {
         let target_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
-                // width: width.into(),
-                // height: height.into(),
-                width: 256,
-                height: 256,
+                width: width.into(),
+                height: height.into(),
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -80,6 +84,16 @@ impl RenderContext {
             size: 2 << 16,
             mapped_at_creation: false,
         });
+        let draw_config_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("draw config buffer"),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    contents: bytemuck::bytes_of(&DrawConfig {
+                        width: width.into(),
+                        height: height.into(),
+                    }),
+                });
         let alpha_masks_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("alpha masks buffer"),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -91,9 +105,22 @@ impl RenderContext {
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: None,
                     entries: &[
-                        // Alpha masks
+                        // Draw configuration uniform
                         wgpu::BindGroupLayoutEntry {
                             binding: 0,
+                            visibility: wgpu::ShaderStages::VERTEX,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: Some(
+                                    draw_config_buffer.size().try_into().unwrap(),
+                                ),
+                            },
+                            count: None,
+                        },
+                        // Alpha masks
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
                             visibility: wgpu::ShaderStages::FRAGMENT,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Uniform,
@@ -168,6 +195,7 @@ impl RenderContext {
 
             bind_group_layout,
             vertex_instance_buffer,
+            draw_config_buffer,
             alpha_masks_buffer,
         }
     }
@@ -232,6 +260,7 @@ pub struct Rasterizer {
 
     bind_group_layout: wgpu::BindGroupLayout,
     vertex_instance_buffer: wgpu::Buffer,
+    draw_config_buffer: wgpu::Buffer,
     alpha_masks_buffer: wgpu::Buffer,
 }
 
@@ -306,10 +335,16 @@ impl Rasterizer {
             let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout: &self.bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.alpha_masks_buffer.as_entire_binding(),
-                }],
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.draw_config_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.alpha_masks_buffer.as_entire_binding(),
+                    },
+                ],
             });
 
             render_pass.set_vertex_buffer(
