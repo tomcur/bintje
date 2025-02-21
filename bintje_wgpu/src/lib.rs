@@ -55,7 +55,7 @@ impl RenderContext {
 
         let draw_shader = self
             .device
-            .create_shader_module(wgpu::include_wgsl!("draw_shader.wgsl"));
+            .create_shader_module(wgpu::include_wgsl!("shaders/draw.wgsl"));
 
         let target_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
