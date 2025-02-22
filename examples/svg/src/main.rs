@@ -4,7 +4,7 @@ use std::path::Path;
 
 use image::ImageEncoder;
 use kurbo::Affine;
-use peniko::color::{self, PremulRgba8, Rgba8};
+use peniko::color::{self, PremulRgba8};
 use pico_svg::Item;
 
 use bintje::{cpu_rasterize, Bintje};

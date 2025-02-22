@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Point {
     pub x: f32,
     pub y: f32,
@@ -14,10 +14,6 @@ impl From<kurbo::Point> for Point {
 }
 
 impl Point {
-    pub(crate) const fn new(x: f32, y: f32) -> Self {
-        Point { x, y }
-    }
-
     /// Rotate the point 90 degrees clockwise in a y-down coordinate system around the origin.
     pub(crate) const fn turn_90(self) -> Self {
         Self {

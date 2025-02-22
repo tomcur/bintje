@@ -1,6 +1,6 @@
 use crate::Point;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Line {
     pub p0: Point,
     pub p1: Point,

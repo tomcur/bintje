@@ -1,38 +1,11 @@
-use crate::{Line, Point};
-
-const ONE_MINUS_ULP: f32 = 0.99999994;
-pub(crate) const ROBUST_EPSILON: f32 = 2e-7;
-
-/// Point within a tile.
-///
-/// `(0,0)` is the top-left corner, and `(u16::MAX,u16::MAX)` is the point just shy of the
-/// bottom-right corner. Note that points on edges of multiple tiles (like `(0,0)`) are considered
-/// to be inside the last tile in scan order (i.e., the bottom-right-most tile).
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct TilePoint {
-    pub x: u16,
-    pub y: u16,
-}
-
-impl TilePoint {
-    fn from_point(point: Point) -> Self {
-        Self {
-            x: (point.x * (u16::MAX / Tile::WIDTH) as f32).round() as u16,
-            y: (point.y * (u16::MAX / Tile::HEIGHT) as f32).round() as u16,
-        }
-    }
-}
+use crate::Line;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Tile {
     /// The tile x-coordinate.
     pub(crate) x: u16,
-    /// The tile y-coordinate.
-    pub(crate) y: u16,
-    /// First point of the line within the tile, packed as two 16-bit floats.
-    pub(crate) p0: TilePoint,
-    /// Second point of the line within the tile, packed as two 16-bit floats.
-    pub(crate) p1: TilePoint,
+    /// The index of the line that belongs to this tile into the line buffer.
+    pub(crate) line_idx: u32,
 }
 
 impl Tile {
@@ -45,7 +18,7 @@ impl Tile {
 
 impl std::cmp::PartialEq for Tile {
     fn eq(&self, other: &Self) -> bool {
-        (self.y, self.x) == (other.y, other.x)
+        self.x == other.x
     }
 }
 
@@ -59,177 +32,105 @@ impl std::cmp::PartialOrd for Tile {
 
 impl std::cmp::Ord for Tile {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (self.y, self.x).cmp(&(other.y, other.x))
+        self.x.cmp(&other.x)
     }
 }
 
-fn span(a: f32, b: f32) -> u32 {
-    (a.max(b).ceil() - a.min(b).floor()).max(1.0) as u32
+/// A row of tiles.
+///
+/// This accounts for the winding and pixel area coverage of geometry that lies to the left of the
+/// row.
+#[derive(Clone, Debug)]
+pub(crate) struct TileRow {
+    /// The tiles that make up this row.
+    pub tiles: Vec<Tile>,
+    /// The winding of the path at this tile row before the start of the row (i.e., the winding
+    /// that occurred to the left of the viewport).
+    pub winding: i32,
+    /// The per-pixel area coverage of the path at this tile row before the start of the row (i.e.,
+    /// the pixel coverage of the path segments to the left of the viewport).
+    pub area_coverage: [f32; Tile::HEIGHT as usize],
 }
 
-impl Tile {
-    /// The tile's line path "delta", used for calculating path winding numbers.
-    ///
-    /// This is either `-1`, `0` or `1`. It is nonzero when the line in this tile crosses the top
-    /// edge. It is `-1` when the line crosses the tile's top edge moving downards, and `1` the
-    /// line crosses the tile's top edge moving upwards.
-    pub(crate) fn delta(&self) -> i32 {
-        (self.p1.y == 0) as i32 - (self.p0.y == 0) as i32
-    }
-}
-
-pub(crate) fn generate_tiles(line: Line, mut callback: impl FnMut(Tile)) {
-    const TILE_SCALE_X: f32 = 1.0 / Tile::WIDTH as f32;
-    const TILE_SCALE_Y: f32 = 1.0 / Tile::HEIGHT as f32;
-
-    // This is adapted from
-    // https://github.com/googlefonts/compute-shader-101/blob/f304096319f65c48f64840fddb9be6a539b20741/compute-shader-toy/src/tiling.rs#L96-L234
-    let p0 = line.p0;
-    let p1 = line.p1;
-    let is_down = p1.y >= p0.y;
-    let (orig_xy0, orig_xy1) = if is_down { (p0, p1) } else { (p1, p0) };
-    let s0 = orig_xy0 * TILE_SCALE_X;
-    let s1 = orig_xy1 * TILE_SCALE_Y;
-
-    // The number of horizontal tiles spanned by the line.
-    let count_x = span(s0.x, s1.x) - 1;
-    let count = count_x + span(s0.y, s1.y);
-
-    let dx = (s1.x - s0.x).abs();
-    let dy = s1.y - s0.y;
-    if dx + dy == 0.0 {
-        return;
-    }
-    if dy == 0.0 && s0.y.floor() == s0.y {
-        return;
-    }
-    let idxdy = 1.0 / (dx + dy);
-    let mut a = dx * idxdy;
-    let is_positive_slope = s1.x >= s0.x;
-    let sign = if is_positive_slope { 1.0 } else { -1.0 };
-    let xt0 = (s0.x * sign).floor();
-    let c = s0.x * sign - xt0;
-    let y0 = s0.y.floor();
-    let ytop = if s0.y == s1.y { s0.y.ceil() } else { y0 + 1.0 };
-    let b = ((dy * c + dx * (ytop - s0.y)) * idxdy).min(ONE_MINUS_ULP);
-    let robust_err = (a * (count as f32 - 1.0) + b).floor() - count_x as f32;
-    if robust_err != 0.0 {
-        a -= ROBUST_EPSILON.copysign(robust_err);
-    }
-    let x0 = xt0 * sign + if is_positive_slope { 0.0 } else { -1.0 };
-
-    let imin = 0;
-    let imax = count;
-    // In the Vello source, here's where we do clipping to viewport (by setting
-    // imin and imax to more restrictive values).
-    // Note: we don't really need to compute this if imin == 0, but it's cheap
-    let mut last_z = (a * (imin as f32 - 1.0) + b).floor();
-    for i in imin..imax {
-        let zf = a * i as f32 + b;
-        let z = zf.floor();
-        let y = (y0 + i as f32 - z) as i32;
-        let x = (x0 + sign * z) as i32;
-
-        let tile_xy = Point::new(
-            x as f32 * Tile::WIDTH as f32,
-            y as f32 * Tile::HEIGHT as f32,
-        );
-        let tile_xy1 = tile_xy + Point::new(Tile::WIDTH as f32, Tile::HEIGHT as f32);
-
-        let mut xy0 = orig_xy0;
-        let mut xy1 = orig_xy1;
-        if i > 0 {
-            if z == last_z {
-                // Top edge is clipped
-                // This calculation should arguably be done on orig_xy. Also might
-                // be worth retaining slope.
-                let mut xt = xy0.x + (xy1.x - xy0.x) * (tile_xy.y - xy0.y) / (xy1.y - xy0.y);
-                xt = xt.clamp(tile_xy.x + 1e-3, tile_xy1.x);
-                xy0 = Point::new(xt, tile_xy.y);
-            } else {
-                // If is_positive_slope, left edge is clipped, otherwise right
-                let x_clip = if is_positive_slope {
-                    tile_xy.x
-                } else {
-                    tile_xy1.x
-                };
-                let mut yt = xy0.y + (xy1.y - xy0.y) * (x_clip - xy0.x) / (xy1.x - xy0.x);
-                yt = yt.clamp(tile_xy.y + 1e-3, tile_xy1.y);
-                xy0 = Point::new(x_clip, yt);
-            }
+impl TileRow {
+    pub(crate) fn new() -> Self {
+        TileRow {
+            tiles: Vec::with_capacity(64),
+            winding: 0,
+            area_coverage: [0.; Tile::HEIGHT as usize],
         }
-        if i < count - 1 {
-            let z_next = (a * (i as f32 + 1.0) + b).floor();
-            if z == z_next {
-                // Bottom edge is clipped
-                let mut xt = xy0.x + (xy1.x - xy0.x) * (tile_xy1.y - xy0.y) / (xy1.y - xy0.y);
-                xt = xt.clamp(tile_xy.x + 1e-3, tile_xy1.x);
-                xy1 = Point::new(xt, tile_xy1.y);
-            } else {
-                // If is_positive_slope, right edge is clipped, otherwise left
-                let x_clip = if is_positive_slope {
-                    tile_xy1.x
-                } else {
-                    tile_xy.x
-                };
-                let mut yt = xy0.y + (xy1.y - xy0.y) * (x_clip - xy0.x) / (xy1.x - xy0.x);
-                yt = yt.clamp(tile_xy.y + 1e-3, tile_xy1.y);
-                xy1 = Point::new(x_clip, yt);
-            }
-        }
-        // Apply numerical robustness logic
-        let mut p0 = xy0 - tile_xy;
-        let mut p1 = xy1 - tile_xy;
-        // one count in fixed point
-        const EPSILON: f32 = 1.0 / 8192.0;
-        if p0.x < EPSILON {
-            if p1.x < EPSILON {
-                p0.x = EPSILON;
-                if p0.y < EPSILON {
-                    // Entire tile
-                    p1.x = EPSILON;
-                    p1.y = Tile::HEIGHT as f32;
-                } else {
-                    // Make segment disappear
-                    p1.x = 2.0 * EPSILON;
-                    p1.y = p0.y;
+    }
+
+    pub(crate) fn sort(&mut self) {
+        self.tiles.sort_unstable();
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.tiles.clear();
+        self.winding = 0;
+        self.area_coverage = [0.; Tile::HEIGHT as usize];
+    }
+}
+
+pub(crate) fn generate_tiles(rows: &mut [TileRow], width: u16, lines: &[Line]) {
+    for (line_idx, line) in lines.iter().copied().enumerate() {
+        let line_idx = u32::try_from(line_idx).expect("Number of lines per path overflowed");
+
+        let width_in_tiles = width.div_ceil(Tile::WIDTH);
+
+        let p0_x = line.p0.x / Tile::WIDTH as f32;
+        let p0_y = line.p0.y / Tile::HEIGHT as f32;
+        let p1_x = line.p1.x / Tile::WIDTH as f32;
+        let p1_y = line.p1.y / Tile::HEIGHT as f32;
+
+        let sign = (p0_y - p1_y).signum();
+
+        let y_top = f32::min(p0_y, p1_y);
+        let y_bottom = f32::max(p0_y, p1_y);
+        let x_left = f32::min(p0_x, p1_x);
+        let x_right = f32::max(p0_x, p1_x);
+
+        // The y-coordinate at the line's leftmost point.
+        let x_left_y = if x_left == p0_x { p0_y } else { p1_y };
+
+        let x_slope = (p1_x - p0_x) / (p1_y - p0_y);
+        let y_slope = (p1_y - p0_y) / (p1_x - p0_x);
+
+        let y_top_tiles = (y_top as u16).min(rows.len() as u16);
+        let y_bottom_tiles = (y_bottom as u16).min(rows.len().saturating_sub(1) as u16);
+
+        for y_idx in y_top_tiles..=y_bottom_tiles {
+            let row = &mut rows[y_idx as usize];
+            let row_y_top = (y_idx as f32).max(y_top).min(y_bottom);
+            let row_y_bottom = ((y_idx + 1) as f32).max(y_top).min(y_bottom);
+
+            if x_left < 0. {
+                // Line's y-coord at the left viewport edge.
+                let viewport_y_left = p0_y - y_slope * p0_x;
+                row.winding +=
+                    sign as i32 * (x_left_y < row_y_top && viewport_y_left >= row_y_top) as i32;
+                for y_px in 0..Tile::HEIGHT {
+                    // TODO(Tom): use constants
+                    let px_y_top = row_y_top + (1. / Tile::HEIGHT as f32) * y_px as f32;
+                    let px_y_bottom = row_y_top + (1. / Tile::HEIGHT as f32) * (y_px + 1) as f32;
+                    row.area_coverage[y_px as usize] += Tile::HEIGHT as f32
+                        * sign
+                        * (x_left_y.max(px_y_top).min(px_y_bottom)
+                            - viewport_y_left.max(px_y_top).min(px_y_bottom))
+                        .abs();
                 }
-            } else if p0.y < EPSILON {
-                p0.x = EPSILON;
             }
-        } else if p1.x < EPSILON && p1.y < EPSILON {
-            p1.x = EPSILON;
-        }
-        // Question: do we need these? Also, maybe should be post-rounding?
-        if p0.x == p0.x.floor() && p0.x != 0.0 {
-            p0.x -= EPSILON;
-        }
-        if p1.x == p1.x.floor() && p1.x != 0.0 {
-            p1.x -= EPSILON;
-        }
-        if !is_down {
-            (p0, p1) = (p1, p0);
-        }
-        // These are regular asserts in Vello, but are debug asserts
-        // here for performance reasons.
-        debug_assert!(p0.x >= 0.0 && p0.x <= Tile::WIDTH as f32);
-        debug_assert!(p0.y >= 0.0 && p0.y <= Tile::HEIGHT as f32);
-        debug_assert!(p1.x >= 0.0 && p1.x <= Tile::WIDTH as f32);
-        debug_assert!(p1.y >= 0.0 && p1.y <= Tile::HEIGHT as f32);
 
-        // Don't output tiles that are above the viewport.
-        if y >= 0 {
-            let tile = Tile {
-                // The tiles are shifted to the right here, to ensure geometry that is to the left of
-                // the viewport can be accounted for in winding calculations.
-                x: (x + 1).clamp(0, u16::MAX as i32) as u16,
-                y: y.clamp(0, u16::MAX as i32) as u16,
-                p0: TilePoint::from_point(p0),
-                p1: TilePoint::from_point(p1),
-            };
-            callback(tile);
-        }
+            // The line's x-coordinates at the row's top- and bottom-most points.
+            let row_y_top_x = p0_x + (row_y_top - p0_y) * x_slope;
+            let row_y_bottom_x = p0_x + (row_y_bottom - p0_y) * x_slope;
 
-        last_z = z;
+            let row_left_x = f32::min(row_y_top_x, row_y_bottom_x).max(x_left);
+            let row_right_x = f32::max(row_y_top_x, row_y_bottom_x).min(x_right);
+
+            for x_idx in row_left_x as u16..(row_right_x as u16 + 1).min(width_in_tiles) {
+                row.tiles.push(Tile { x: x_idx, line_idx });
+            }
+        }
     }
 }

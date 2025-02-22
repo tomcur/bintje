@@ -15,6 +15,8 @@ mod tests;
 pub(crate) use line::Line;
 pub(crate) use point::Point;
 pub(crate) use strip::Strip;
+pub(crate) use tile::TileRow;
+
 pub use tile::Tile;
 pub use wide_tile::{cpu_rasterize, Command, Sample, SparseFill, WideTile};
 
@@ -43,7 +45,7 @@ pub struct Bintje {
     /// Reusable line scratch buffer.
     lines: Vec<Line>,
     /// Reusable tile scratch buffer.
-    tiles: Vec<Tile>,
+    tile_rows: Vec<TileRow>,
     /// Reusable strip scratch buffer.
     strips: Vec<Strip>,
 
@@ -101,7 +103,7 @@ impl Bintje {
             wide_tiles,
             alpha_masks: Vec::with_capacity(65536),
             lines: Vec::with_capacity(512),
-            tiles: Vec::with_capacity(256),
+            tile_rows: vec![TileRow::new(); wide_tile_rows as usize],
             strips: Vec::with_capacity(64),
 
             flattening_time: std::time::Duration::ZERO,
@@ -166,21 +168,27 @@ impl Bintje {
     /// Consume the lines, turning them into tiles.
     fn tile(&mut self) {
         let start = std::time::Instant::now();
-        for line in self.lines.drain(..) {
-            tile::generate_tiles(line, |tile| {
-                self.tiles.push(tile);
-            });
-        }
+        tile::generate_tiles(&mut self.tile_rows, self.width, &self.lines);
         self.tile_generation_time += start.elapsed();
         let start = std::time::Instant::now();
-        self.tiles.sort_unstable();
+        for row in self.tile_rows.iter_mut() {
+            row.sort();
+        }
         self.tile_sorting_time += start.elapsed();
     }
 
     /// Consume tiles, turning them into strips.
     fn strip(&mut self) {
         let start = std::time::Instant::now();
-        strip::generate_strips(&self.tiles, &mut self.alpha_masks, &mut self.strips);
+        for (y, row) in self.tile_rows.iter().enumerate() {
+            strip::generate_strips(
+                row,
+                y as u16,
+                &self.lines,
+                &mut self.alpha_masks,
+                &mut self.strips,
+            );
+        }
         self.strip_generation_time += start.elapsed();
     }
 
@@ -238,7 +246,9 @@ impl Bintje {
         brush: impl Into<peniko::BrushRef<'b>>,
     ) {
         self.lines.clear();
-        self.tiles.clear();
+        for tile_row in self.tile_rows.iter_mut() {
+            tile_row.clear();
+        }
         self.strips.clear();
         self.flatten_path(path);
         self.tile();
@@ -272,12 +282,26 @@ impl Bintje {
             );
         } else {
             self.lines.clear();
-            self.tiles.clear();
+            for tile_row in self.tile_rows.iter_mut() {
+                tile_row.clear();
+            }
             self.strips.clear();
             let start = std::time::Instant::now();
             let lines: flatten::stroke::LoweredPath<kurbo::Line> =
                 flatten::stroke::stroke_undashed(path, style, 0.25 / self.current_scale);
-            for line in lines.path {
+
+            let mut prev_line: Option<kurbo::Line> = None;
+            for (idx, mut line) in lines.path.into_iter().enumerate() {
+                if idx > 0 {
+                    // TODO: there appear to be some watertightness issues in `flatten`, this works
+                    // around that, but could have false-positives and may introduce watertightness
+                    // issues by itself.
+                    let p1 = prev_line.unwrap().p1;
+                    if (line.p0 - p1).hypot2() < 0.2 {
+                        line.p0 = prev_line.unwrap().p1;
+                    }
+                }
+                prev_line = Some(line);
                 self.lines
                     .push(Line::from_kurbo(self.current_transform * line));
             }
