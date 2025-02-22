@@ -51,13 +51,8 @@ fn vs(
     @builtin(vertex_index) idx: u32,
     instance: Instance,
 ) -> VertexOutput {
-    // TODO(Tom): we shift the vertex to the left here, to undo the shift to
-    // the right done by the tiling. Once tiling stops shifting to the right,
-    // we should stop shifting to the left.
-    // let x0 = -1 + 2 * f32(instance.x) / f32(config.width);
-    // let x1 = -1 + 2 * f32(instance.x + instance.width) / f32(config.width);
-    let x0 = -1 + 2 * (f32(instance.x) - f32(TILE_WIDTH)) / f32(config.width);
-    let x1 = -1 + 2 * (f32(instance.x + instance.width) - f32(TILE_WIDTH)) / f32(config.width);
+    let x0 = -1 + 2 * f32(instance.x) / f32(config.width);
+    let x1 = -1 + 2 * f32(instance.x + instance.width) / f32(config.width);
     let y0 = 1 - 2 * f32(instance.y) / f32(config.height);
     let y1 = 1 - 2 * f32(instance.y + TILE_HEIGHT) / f32(config.height);
     let vertex = array(
@@ -71,8 +66,7 @@ fn vs(
     output.pos = vec4(vertex[idx], 0.0, 1.0);
     output.color = unpack4x8unorm(instance.color);
     output.alpha_idx = instance.alpha_idx;
-    output.x = instance.x - TILE_WIDTH;
-    // output.x = instance.x;
+    output.x = instance.x;
     output.y = instance.y;
     return output;
 }
