@@ -31,6 +31,7 @@ pub(crate) fn generate_strips(
     alpha_storage: &mut Vec<u8>,
     strips: &mut Vec<Strip>,
 ) {
+    // TODO(Tom): handle the case where the row has a nonzero winding number.
     if row.tiles.is_empty() || lines.is_empty() {
         return;
     }
@@ -40,11 +41,6 @@ pub(crate) fn generate_strips(
     // downwards. Horizontal lines leave it unchanged.
     let mut winding_delta: i32 = row.winding;
 
-    // The index of the strip we're currently building into the alpha mask storage.
-    let mut alpha_idx = alpha_storage.len();
-
-    // The first tile of the strip we're currently building.
-    let mut first_tile = row.tiles[0];
     // The previous tile visited.
     let mut prev_tile = row.tiles[0];
     // The accumulated (fractional) winding of the tile-sized location we're currently at:
@@ -60,6 +56,15 @@ pub(crate) fn generate_strips(
     const GATE_CLOSER: Tile = Tile {
         x: u16::MAX,
         line_idx: 0,
+    };
+
+    // The strip we're building.
+    let mut strip = Strip {
+        x: prev_tile.x,
+        y: row_y,
+        width: 0,
+        winding: 0,
+        alpha_idx: alpha_storage.len() as u32,
     };
 
     for tile in row.tiles.iter().copied().chain([GATE_CLOSER]) {
@@ -81,16 +86,16 @@ pub(crate) fn generate_strips(
 
         // Push out the strip if we're moving to a next strip.
         if prev_tile.x + 1 < tile.x {
-            let strip = Strip {
-                x: first_tile.x,
-                y: row_y,
-                width: prev_tile.x - first_tile.x + 1,
-                winding: winding_delta,
-                alpha_idx: alpha_idx as u32,
-            };
+            strip.width = prev_tile.x - strip.x + 1;
+            strip.winding = winding_delta;
             strips.push(strip);
-            first_tile = tile;
-            alpha_idx = alpha_storage.len();
+            strip = Strip {
+                x: tile.x,
+                y: row_y,
+                width: 0,
+                winding: 0,
+                alpha_idx: alpha_storage.len() as u32,
+            };
             // Note: this fill is mathematically not necessary. It provides a way to reduce
             // accumulation of float round errors.
             accumulated_winding.fill(winding_delta as f32);
