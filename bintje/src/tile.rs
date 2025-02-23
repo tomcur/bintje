@@ -110,7 +110,6 @@ pub(crate) fn generate_tiles(rows: &mut [TileRow], width: u16, lines: &[Line]) {
                 row.winding +=
                     sign as i32 * (x_left_y < row_y_top && viewport_y_left >= row_y_top) as i32;
                 for y_px in 0..Tile::HEIGHT {
-                    // TODO(Tom): use constants
                     let px_y_top = row_y_top + (1. / Tile::HEIGHT as f32) * y_px as f32;
                     let px_y_bottom = row_y_top + (1. / Tile::HEIGHT as f32) * (y_px + 1) as f32;
                     row.area_coverage[y_px as usize] += Tile::HEIGHT as f32
