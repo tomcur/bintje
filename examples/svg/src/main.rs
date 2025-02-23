@@ -91,6 +91,10 @@ pub fn main() {
         "Fine elapsed:                   {:?}ms",
         fine.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
     );
+    println!(
+        " - GPU minus copy out:          {:?}ms",
+        fragment_shader.fine_time.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
+    );
 
     unpremultiply(&mut img);
     let file = std::fs::OpenOptions::new()
