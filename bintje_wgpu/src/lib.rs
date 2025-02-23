@@ -311,6 +311,9 @@ impl Rasterizer {
         let alpha_masks_buffer_offset =
             alpha_mask_buf_step as u64 * LIMITS.max_uniform_buffer_binding_size as u64;
 
+        // TODO(Tom): going through `write_buffer_with` in slices of
+        // `LIMITS.max_uniform_buffer_binding_size` appears to save about 0.1 ms against a baseline
+        // of 1.3 ms for a 1600x1600 Tiger in GPU rasteriziation.
         self.queue.write_buffer(
             &self.alpha_masks_buffer,
             alpha_masks_buffer_offset,
