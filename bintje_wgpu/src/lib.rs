@@ -81,7 +81,8 @@ impl RenderContext {
         let vertex_instance_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vertex instance buffer"),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            size: 2 << 16,
+            // TODO(Tom): how to determine a good size for this buffer?
+            size: 2 << 18, // 512 KiB
             mapped_at_creation: false,
         });
         let draw_config_buffer =
@@ -97,7 +98,9 @@ impl RenderContext {
         let alpha_masks_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("alpha masks buffer"),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            size: LIMITS.max_uniform_buffer_binding_size as u64,
+            // TODO(Tom): how to determine a good size for this buffer?
+            // size: LIMITS.max_uniform_buffer_binding_size as u64,
+            size: 2 << 18, // 512 KiB
             mapped_at_creation: false,
         });
         let bind_group_layout =
@@ -197,6 +200,8 @@ impl RenderContext {
             vertex_instance_buffer,
             draw_config_buffer,
             alpha_masks_buffer,
+
+            fine_time: std::time::Duration::ZERO,
         }
     }
 }
@@ -262,6 +267,8 @@ pub struct Rasterizer {
     vertex_instance_buffer: wgpu::Buffer,
     draw_config_buffer: wgpu::Buffer,
     alpha_masks_buffer: wgpu::Buffer,
+
+    pub fine_time: std::time::Duration,
 }
 
 /// A buffer to copy textures into from the GPU.
@@ -292,21 +299,26 @@ impl TextureCopyBuffer {
 }
 
 impl Rasterizer {
-    fn submit(
+    fn add_draw_render_pass(
         &self,
-        mut encoder: wgpu::CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         clear_texture: bool,
         instances: &mut Vec<DrawCmdVertexInstance>,
+        instances_offset: u32,
         alpha_masks: &mut Vec<u8>,
+        alpha_mask_buf_step: u32,
     ) {
+        let alpha_masks_buffer_offset =
+            alpha_mask_buf_step as u64 * LIMITS.max_uniform_buffer_binding_size as u64;
+
         self.queue.write_buffer(
             &self.alpha_masks_buffer,
-            0,
+            alpha_masks_buffer_offset,
             bytemuck::cast_slice(alpha_masks),
         );
         self.queue.write_buffer(
             &self.vertex_instance_buffer,
-            0,
+            (instances_offset as usize * size_of::<DrawCmdVertexInstance>()) as u64,
             bytemuck::cast_slice(instances),
         );
 
@@ -342,25 +354,33 @@ impl Rasterizer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: self.alpha_masks_buffer.as_entire_binding(),
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &self.alpha_masks_buffer,
+                            offset: alpha_masks_buffer_offset,
+                            size: Some(
+                                (LIMITS.max_uniform_buffer_binding_size as u64)
+                                    .try_into()
+                                    .unwrap(),
+                            ),
+                        }), // .alpha_masks_buffer
+                            // .slice(0..(alpha_masks.len() as u64))
+                            // .as_entire_binding(),
                     },
                 ],
             });
 
             render_pass.set_vertex_buffer(
                 0,
-                self.vertex_instance_buffer
-                    .slice(0..(instances.len() * size_of::<DrawCmdVertexInstance>()) as u64),
+                self.vertex_instance_buffer.slice(
+                    instances_offset as u64 * size_of::<DrawCmdVertexInstance>() as u64
+                        ..((instances_offset as usize + instances.len())
+                            * size_of::<DrawCmdVertexInstance>()) as u64,
+                ),
             );
             render_pass.set_bind_group(0, &bind_group, &[]);
             render_pass.set_pipeline(&self.pipeline);
             render_pass.draw(0..4, 0..instances.len() as u32);
         }
-
-        instances.clear();
-        alpha_masks.clear();
-
-        self.queue.submit([encoder.finish()]);
     }
 
     /// Rasterize the per-tile command lists and given alpha masks, and copy the resulting GPU
@@ -374,7 +394,9 @@ impl Rasterizer {
         width: u16,
         dest_img: &mut [u8],
     ) {
+        let t_start = std::time::Instant::now();
         let wide_tiles_per_row = width.div_ceil(bintje::WideTile::WIDTH_PX);
+        let mut submits = 0;
 
         let mut instances = Vec::new();
         let mut alpha_masks_buffer = Vec::<u8>::new();
@@ -383,6 +405,8 @@ impl Rasterizer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         let mut submitted = false;
+        let mut instances_offset = 0;
+        let mut alpha_masks_buffer_step = 0;
         for (idx, wide_tile) in wide_tiles.iter().enumerate() {
             let wide_tile_y = (idx / wide_tiles_per_row as usize) as u16;
             let wide_tile_x = (idx - (wide_tile_y as usize * wide_tiles_per_row as usize)) as u16;
@@ -399,19 +423,35 @@ impl Rasterizer {
                         if alpha_idx + alpha_mask_size
                             > LIMITS.max_uniform_buffer_binding_size as usize
                         {
+                            self.add_draw_render_pass(
+                                &mut encoder,
+                                !submitted,
+                                &mut instances,
+                                instances_offset,
+                                &mut alpha_masks_buffer,
+                                alpha_masks_buffer_step,
+                            );
+                            instances_offset += instances.len() as u32;
+                            instances.clear();
+                            alpha_masks_buffer.clear();
+                            alpha_masks_buffer_step += 1;
+                            submitted = true;
+                        }
+                        if alpha_masks_buffer_step
+                            == (self.alpha_masks_buffer.size()
+                                / LIMITS.max_uniform_buffer_binding_size as u64)
+                                as u32
+                        {
                             let encoder = std::mem::replace(
                                 &mut encoder,
                                 self.device.create_command_encoder(
                                     &wgpu::CommandEncoderDescriptor { label: None },
                                 ),
                             );
-                            self.submit(
-                                encoder,
-                                !submitted,
-                                &mut instances,
-                                &mut alpha_masks_buffer,
-                            );
-                            submitted = true;
+                            submits += 1;
+                            self.queue.submit([encoder.finish()]);
+                            alpha_masks_buffer_step = 0;
+                            instances_offset = 0;
                         }
                         alpha_masks_buffer.extend_from_slice(
                             &alpha_masks[sample.alpha_idx as usize
@@ -442,8 +482,23 @@ impl Rasterizer {
             }
         }
         if !instances.is_empty() {
-            self.submit(encoder, !submitted, &mut instances, &mut alpha_masks_buffer);
+            // self.submit(encoder, !submitted, &mut instances, &mut alpha_masks_buffer);
+            self.add_draw_render_pass(
+                &mut encoder,
+                !submitted,
+                &mut instances,
+                instances_offset,
+                &mut alpha_masks_buffer,
+                alpha_masks_buffer_step,
+            );
+            self.queue.submit([encoder.finish()]);
+            submits += 1;
         }
+        dbg!(submits);
+
+        // Do not account for copying the buffer out to the texture. That wouldn't happen when
+        // rendering to the surface.
+        self.fine_time += t_start.elapsed();
 
         let mut encoder = self
             .device
