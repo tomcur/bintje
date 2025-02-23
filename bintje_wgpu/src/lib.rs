@@ -362,9 +362,7 @@ impl Rasterizer {
                                     .try_into()
                                     .unwrap(),
                             ),
-                        }), // .alpha_masks_buffer
-                            // .slice(0..(alpha_masks.len() as u64))
-                            // .as_entire_binding(),
+                        }),
                     },
                 ],
             });
@@ -404,7 +402,7 @@ impl Rasterizer {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        let mut submitted = false;
+        let mut render_target_cleared = false;
         let mut instances_offset = 0;
         let mut alpha_masks_buffer_step = 0;
         for (idx, wide_tile) in wide_tiles.iter().enumerate() {
@@ -425,7 +423,7 @@ impl Rasterizer {
                         {
                             self.add_draw_render_pass(
                                 &mut encoder,
-                                !submitted,
+                                !render_target_cleared,
                                 &mut instances,
                                 instances_offset,
                                 &mut alpha_masks_buffer,
@@ -435,7 +433,7 @@ impl Rasterizer {
                             instances.clear();
                             alpha_masks_buffer.clear();
                             alpha_masks_buffer_step += 1;
-                            submitted = true;
+                            render_target_cleared = true;
                         }
                         if alpha_masks_buffer_step
                             == (self.alpha_masks_buffer.size()
@@ -485,7 +483,7 @@ impl Rasterizer {
             // self.submit(encoder, !submitted, &mut instances, &mut alpha_masks_buffer);
             self.add_draw_render_pass(
                 &mut encoder,
-                !submitted,
+                !render_target_cleared,
                 &mut instances,
                 instances_offset,
                 &mut alpha_masks_buffer,
