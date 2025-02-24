@@ -82,7 +82,7 @@ impl RenderContext {
             label: Some("vertex instance buffer"),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             // TODO(Tom): how to determine a good size for this buffer?
-            size: 2 << 18, // 512 KiB
+            size: 1 << 19, // 512 KiB
             mapped_at_creation: false,
         });
         let draw_config_buffer =
@@ -99,8 +99,7 @@ impl RenderContext {
             label: Some("alpha masks buffer"),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             // TODO(Tom): how to determine a good size for this buffer?
-            // size: LIMITS.max_uniform_buffer_binding_size as u64,
-            size: 2 << 18, // 512 KiB
+            size: 1 << 19, // 512 KiB
             mapped_at_creation: false,
         });
         let bind_group_layout =
@@ -127,7 +126,7 @@ impl RenderContext {
                             visibility: wgpu::ShaderStages::FRAGMENT,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
+                                has_dynamic_offset: true,
                                 min_binding_size: Some(
                                     (LIMITS.max_uniform_buffer_binding_size as u64)
                                         .try_into()
@@ -303,25 +302,13 @@ impl Rasterizer {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         clear_texture: bool,
-        instances: &mut Vec<DrawCmdVertexInstance>,
-        instances_offset: u32,
-        alpha_masks: &mut Vec<u8>,
+        instances: &[DrawCmdVertexInstance],
+        instance_offsets: &[u32],
         alpha_mask_buf_step: u32,
     ) {
-        let alpha_masks_buffer_offset =
-            alpha_mask_buf_step as u64 * LIMITS.max_uniform_buffer_binding_size as u64;
-
-        // TODO(Tom): going through `write_buffer_with` in slices of
-        // `LIMITS.max_uniform_buffer_binding_size` appears to save about 0.1 ms against a baseline
-        // of 1.3 ms for a 1600x1600 Tiger in GPU rasteriziation.
-        self.queue.write_buffer(
-            &self.alpha_masks_buffer,
-            alpha_masks_buffer_offset,
-            bytemuck::cast_slice(alpha_masks),
-        );
         self.queue.write_buffer(
             &self.vertex_instance_buffer,
-            (instances_offset as usize * size_of::<DrawCmdVertexInstance>()) as u64,
+            0,
             bytemuck::cast_slice(instances),
         );
 
@@ -359,7 +346,7 @@ impl Rasterizer {
                         binding: 1,
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: &self.alpha_masks_buffer,
-                            offset: alpha_masks_buffer_offset,
+                            offset: 0,
                             size: Some(
                                 (LIMITS.max_uniform_buffer_binding_size as u64)
                                     .try_into()
@@ -372,15 +359,21 @@ impl Rasterizer {
 
             render_pass.set_vertex_buffer(
                 0,
-                self.vertex_instance_buffer.slice(
-                    instances_offset as u64 * size_of::<DrawCmdVertexInstance>() as u64
-                        ..((instances_offset as usize + instances.len())
-                            * size_of::<DrawCmdVertexInstance>()) as u64,
-                ),
+                self.vertex_instance_buffer
+                    .slice(0..(instances.len() * size_of::<DrawCmdVertexInstance>()) as u64),
             );
-            render_pass.set_bind_group(0, &bind_group, &[]);
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.draw(0..4, 0..instances.len() as u32);
+            let mut instance_offset = 0;
+            for step in 0..=alpha_mask_buf_step {
+                let next_instance_offset = instance_offsets[step as usize];
+                render_pass.set_bind_group(
+                    0,
+                    &bind_group,
+                    &[step * LIMITS.max_uniform_buffer_binding_size],
+                );
+                render_pass.draw(0..4, instance_offset..next_instance_offset as u32);
+                instance_offset = next_instance_offset;
+            }
         }
     }
 
@@ -399,15 +392,32 @@ impl Rasterizer {
         let wide_tiles_per_row = width.div_ceil(bintje::WideTile::WIDTH_PX);
         let mut submits = 0;
 
-        let mut instances = Vec::new();
-        let mut alpha_masks_buffer = Vec::<u8>::new();
+        let mut instances = Vec::with_capacity(
+            (self.vertex_instance_buffer.size()
+                / std::mem::size_of::<DrawCmdVertexInstance>() as u64) as usize,
+        );
+        let mut instance_offsets = Vec::with_capacity(
+            self.alpha_masks_buffer.size() as usize
+                / LIMITS.max_uniform_buffer_binding_size as usize,
+        );
+
+        // The uniform-buffer-sized step within the alpha mask buffer.
+        let mut alpha_masks_buffer_step = 0;
+        let mut alpha_masks_buffer_idx = 0;
+        let mut alpha_masks_buffer = self
+            .queue
+            .write_buffer_with(
+                &self.alpha_masks_buffer,
+                0,
+                self.alpha_masks_buffer.size().try_into().unwrap(),
+            )
+            .unwrap();
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         let mut render_target_cleared = false;
-        let mut instances_offset = 0;
-        let mut alpha_masks_buffer_step = 0;
         for (idx, wide_tile) in wide_tiles.iter().enumerate() {
             let wide_tile_y = (idx / wide_tiles_per_row as usize) as u16;
             let wide_tile_x = (idx - (wide_tile_y as usize * wide_tiles_per_row as usize)) as u16;
@@ -420,44 +430,61 @@ impl Rasterizer {
                         let alpha_mask_size = sample.width as usize
                             * bintje::Tile::WIDTH as usize
                             * bintje::Tile::HEIGHT as usize;
-                        let alpha_idx = alpha_masks_buffer.len();
-                        if alpha_idx + alpha_mask_size
-                            > LIMITS.max_uniform_buffer_binding_size as usize
+                        if alpha_masks_buffer_idx + alpha_mask_size
+                            > (alpha_masks_buffer_step + 1) as usize
+                                * LIMITS.max_uniform_buffer_binding_size as usize
                         {
-                            self.add_draw_render_pass(
-                                &mut encoder,
-                                !render_target_cleared,
-                                &mut instances,
-                                instances_offset,
-                                &mut alpha_masks_buffer,
-                                alpha_masks_buffer_step,
-                            );
-                            instances_offset += instances.len() as u32;
-                            instances.clear();
-                            alpha_masks_buffer.clear();
                             alpha_masks_buffer_step += 1;
-                            render_target_cleared = true;
+                            instance_offsets.push(instances.len() as u32);
+
+                            if alpha_masks_buffer_step
+                                == (self.alpha_masks_buffer.size()
+                                    / LIMITS.max_uniform_buffer_binding_size as u64)
+                                    as u32
+                            {
+                                self.add_draw_render_pass(
+                                    &mut encoder,
+                                    !render_target_cleared,
+                                    &instances,
+                                    &instance_offsets,
+                                    alpha_masks_buffer_step - 1,
+                                );
+                                render_target_cleared = true;
+                                let encoder = std::mem::replace(
+                                    &mut encoder,
+                                    self.device.create_command_encoder(
+                                        &wgpu::CommandEncoderDescriptor { label: None },
+                                    ),
+                                );
+                                // Replace the writable alpha mask view. The old view is dropped
+                                // and the data is queued for uploading.
+                                let _ = std::mem::replace(
+                                    &mut alpha_masks_buffer,
+                                    self.queue
+                                        .write_buffer_with(
+                                            &self.alpha_masks_buffer,
+                                            0,
+                                            self.alpha_masks_buffer.size().try_into().unwrap(),
+                                        )
+                                        .unwrap(),
+                                );
+                                self.queue.submit([encoder.finish()]);
+                                submits += 1;
+                                instances.clear();
+                                instance_offsets.clear();
+                                alpha_masks_buffer_step = 0;
+                                alpha_masks_buffer_idx = 0;
+                            }
                         }
-                        if alpha_masks_buffer_step
-                            == (self.alpha_masks_buffer.size()
-                                / LIMITS.max_uniform_buffer_binding_size as u64)
-                                as u32
-                        {
-                            let encoder = std::mem::replace(
-                                &mut encoder,
-                                self.device.create_command_encoder(
-                                    &wgpu::CommandEncoderDescriptor { label: None },
-                                ),
+                        let alpha_idx = alpha_masks_buffer_idx
+                            % LIMITS.max_uniform_buffer_binding_size as usize;
+                        alpha_masks_buffer
+                            [alpha_masks_buffer_idx..alpha_masks_buffer_idx + alpha_mask_size]
+                            .copy_from_slice(
+                                &alpha_masks[sample.alpha_idx as usize
+                                    ..sample.alpha_idx as usize + alpha_mask_size],
                             );
-                            submits += 1;
-                            self.queue.submit([encoder.finish()]);
-                            alpha_masks_buffer_step = 0;
-                            instances_offset = 0;
-                        }
-                        alpha_masks_buffer.extend_from_slice(
-                            &alpha_masks[sample.alpha_idx as usize
-                                ..sample.alpha_idx as usize + alpha_mask_size],
-                        );
+                        alpha_masks_buffer_idx += alpha_mask_size;
                         instances.push(DrawCmdVertexInstance {
                             x: (wide_tile_x * bintje::WideTile::WIDTH_TILES + sample.x)
                                 * bintje::Tile::WIDTH,
@@ -483,13 +510,14 @@ impl Rasterizer {
             }
         }
         if !instances.is_empty() {
-            // self.submit(encoder, !submitted, &mut instances, &mut alpha_masks_buffer);
+            // Drop the writable alpha mask view, the data is queued for uploading.
+            drop(alpha_masks_buffer);
+            instance_offsets.push(instances.len() as u32);
             self.add_draw_render_pass(
                 &mut encoder,
                 !render_target_cleared,
-                &mut instances,
-                instances_offset,
-                &mut alpha_masks_buffer,
+                &instances,
+                &instance_offsets,
                 alpha_masks_buffer_step,
             );
             self.queue.submit([encoder.finish()]);
