@@ -20,6 +20,8 @@ struct Instance {
     @location(3) alpha_idx: u32,
     // The color to draw.
     @location(4) color: u32,
+    // An alpha mask vector to be applied to the columns.
+    @location(5) column_mask: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -30,10 +32,12 @@ struct VertexOutput {
     // The starting index into the alpha mask buffer. If this is 0xffff, the
     // draw is a fill.
     @location(1) alpha_idx: u32,
+    // An alpha mask vector to be applied to the columns.
+    @location(2) column_mask: vec4<f32>,
     // The draw command origin x-coordinate in pixels.
-    @location(2) x: u32,
+    @location(3) x: u32,
     // The draw command origin y-coordinate in pixels.
-    @location(3) y: u32,
+    @location(4) y: u32,
 }
 
 struct Config {
@@ -68,6 +72,7 @@ fn vs(
     output.alpha_idx = instance.alpha_idx;
     output.x = instance.x;
     output.y = instance.y;
+    output.column_mask = instance.column_mask;
     return output;
 }
 
@@ -84,8 +89,10 @@ fn fs(in: VertexOutput) -> FragOut {
     let in_y = floor(in.pos.y);
 
     var output: FragOut;
-    let alpha_idx = in.alpha_idx + (u32(in_x) - in.x) / TILE_HEIGHT;
-    let alpha_mask = unpack4x8unorm(alpha_masks[alpha_idx][u32(in_x) % TILE_HEIGHT]);
-    output.color = (f32(in.alpha_idx == 0xffff) + f32(in.alpha_idx != 0xffff) * alpha_mask[u32(in_y) - in.y]) * in.color;
+    let alpha_idx = in.alpha_idx + (u32(in_x) - in.x) / TILE_WIDTH;
+    let alpha_mask = unpack4x8unorm(alpha_masks[alpha_idx][u32(in_x) % TILE_WIDTH]);
+    output.color = in.color
+        * in.column_mask[u32(in_y) % TILE_HEIGHT]
+        * (f32(in.alpha_idx == 0xffff) + f32(in.alpha_idx != 0xffff) * alpha_mask[u32(in_y) - in.y]);
     return output;
 }

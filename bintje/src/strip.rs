@@ -98,7 +98,10 @@ pub(crate) fn generate_strips(
             };
             // Note: this fill is mathematically not necessary. It provides a way to reduce
             // accumulation of float round errors.
-            accumulated_winding.fill(winding_delta as f32);
+            // TODO(Tom): since horizontal geometry is elided, we'd need to track (on tiles?)
+            // whether there was any horizontal geometry here. Without that, we can't easily know
+            // here currently if per-pixel winding is equal to the coarse winding.
+            // accumulated_winding.fill(winding_delta as f32);
 
             // TODO: maybe just push out the strip manually at the end, rather than this?
             if tile.x == u16::MAX {

@@ -16,6 +16,8 @@ pub enum Command {
     /// A fill sampling from an alpha mask.
     Sample(Sample),
 
+    /// A fill between two strips sampling from an alpha mask column.
+    SparseSample(SparseSample),
     /// An opaque fill between two strips.
     SparseFill(SparseFill),
 
@@ -34,6 +36,14 @@ pub struct Sample {
     pub color: PremulRgba8,
     /// The index into the global alpha mask, encoding the pixel coverage of the area to be filled.
     pub alpha_idx: u32,
+}
+
+#[derive(Debug)]
+pub struct SparseSample {
+    pub x: u16,
+    pub width: u16,
+    pub color: PremulRgba8,
+    pub alpha_mask: [u8; Tile::HEIGHT as usize],
 }
 
 #[derive(Debug)]
@@ -84,7 +94,8 @@ pub(crate) fn generate_wide_tile_commands<'b>(
         // Command sparse fills.
         // TODO(Tom): do sparse masked fills (these are currently not generated, as horizontal
         // geometry is not yet elided)
-        if strip.pixel_coverage == [255; Tile::HEIGHT as usize] && prev_x < strip.x {
+        if strip.pixel_coverage != [0; Tile::HEIGHT as usize] && prev_x < strip.x {
+            let fill = strip.pixel_coverage == [255; Tile::HEIGHT as usize];
             let start_wide_tile_x = prev_x / WIDE_TILE_WIDTH_TILES;
             let end_wide_tile_x = strip.x / WIDE_TILE_WIDTH_TILES;
             for wide_tile_x in start_wide_tile_x..=end_wide_tile_x {
@@ -107,11 +118,20 @@ pub(crate) fn generate_wide_tile_commands<'b>(
                 let wide_tile = wide_tiles
                     .get_mut((wide_tile_y * wide_tile_columns + wide_tile_x) as usize)
                     .unwrap();
-                wide_tile.commands.push(Command::SparseFill(SparseFill {
-                    x: x_start,
-                    width: x_end - x_start,
-                    color: color.premultiply().to_rgba8(),
-                }));
+                if fill {
+                    wide_tile.commands.push(Command::SparseFill(SparseFill {
+                        x: x_start,
+                        width: x_end - x_start,
+                        color: color.premultiply().to_rgba8(),
+                    }));
+                } else {
+                    wide_tile.commands.push(Command::SparseSample(SparseSample {
+                        x: x_start,
+                        width: x_end - x_start,
+                        color: color.premultiply().to_rgba8(),
+                        alpha_mask: strip.pixel_coverage,
+                    }));
+                }
             }
         }
 
@@ -217,6 +237,22 @@ pub fn cpu_rasterize(
                                     + y as usize;
                                 let composite_color =
                                     mul_alpha(sample.color, alpha_masks[alpha_idx]);
+                                scratch[idx] = over(scratch[idx], composite_color);
+                                idx += 1;
+                            }
+                        }
+                    }
+                    Command::SparseSample(sparse_sample) => {
+                        for y in 0..Tile::HEIGHT {
+                            let mut idx = y as usize * WIDE_TILE_WIDTH_PX as usize
+                                + (sparse_sample.x * Tile::WIDTH) as usize;
+
+                            let composite_color = mul_alpha(
+                                sparse_sample.color,
+                                sparse_sample.alpha_mask[y as usize],
+                            );
+
+                            for _ in 0..sparse_sample.width * Tile::WIDTH {
                                 scratch[idx] = over(scratch[idx], composite_color);
                                 idx += 1;
                             }

@@ -213,6 +213,7 @@ struct DrawCmdVertexInstance {
     width: u16,
     alpha_idx: u16,
     color: PremulRgba8,
+    column_mask: [u8; bintje::Tile::HEIGHT as usize],
 }
 
 impl DrawCmdVertexInstance {
@@ -245,6 +246,12 @@ impl DrawCmdVertexInstance {
                     offset: std::mem::size_of::<[u16; 4]>() as wgpu::BufferAddress,
                     shader_location: 4,
                     format: wgpu::VertexFormat::Uint32,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[u16; 6]>()
+                        as wgpu::BufferAddress,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Unorm8x4,
                 },
             ],
         }
@@ -493,6 +500,18 @@ impl Rasterizer {
                             color: sample.color,
                             alpha_idx: alpha_idx as u16
                                 / (bintje::Tile::WIDTH * bintje::Tile::HEIGHT),
+                            column_mask: [255; bintje::Tile::HEIGHT as usize],
+                        });
+                    }
+                    bintje::Command::SparseSample(sparse_sample) => {
+                        instances.push(DrawCmdVertexInstance {
+                            x: (wide_tile_x * bintje::WideTile::WIDTH_TILES + sparse_sample.x)
+                                * bintje::Tile::WIDTH,
+                            y: wide_tile_y * bintje::Tile::HEIGHT,
+                            width: sparse_sample.width * bintje::Tile::WIDTH,
+                            color: sparse_sample.color,
+                            alpha_idx: u16::MAX,
+                            column_mask: sparse_sample.alpha_mask,
                         });
                     }
                     bintje::Command::SparseFill(sparse_fill) => {
@@ -503,6 +522,7 @@ impl Rasterizer {
                             width: sparse_fill.width * bintje::Tile::WIDTH,
                             color: sparse_fill.color,
                             alpha_idx: u16::MAX,
+                            column_mask: [255; bintje::Tile::HEIGHT as usize],
                         });
                     }
                     _ => {}

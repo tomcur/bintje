@@ -74,6 +74,11 @@ impl TileRow {
 
 pub(crate) fn generate_tiles(rows: &mut [TileRow], width: u16, lines: &[Line]) {
     for (line_idx, line) in lines.iter().copied().enumerate() {
+        if line.p0.y == line.p1.y {
+            // Skip horizontal geometry.
+            continue;
+        }
+
         let line_idx = u32::try_from(line_idx).expect("Number of lines per path overflowed");
 
         let width_in_tiles = width.div_ceil(Tile::WIDTH);
@@ -126,8 +131,8 @@ pub(crate) fn generate_tiles(rows: &mut [TileRow], width: u16, lines: &[Line]) {
         } else {
             let x_slope = (p1_x - p0_x) / (p1_y - p0_y);
             if !x_slope.is_finite() {
-                // TODO: elide horizontal lines.
-                // unreachable!()
+                // Horizontal geometry is elided.
+                unreachable!()
             }
 
             let y_top_tiles = (line_top_y as u16).min(rows.len() as u16);
