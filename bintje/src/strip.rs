@@ -12,11 +12,12 @@ pub struct Strip {
     /// The width of the strip (in number of tiles).
     pub width: u16,
 
-    /// The winding of the path at the end (i.e, right-most edge) of the strip.
+    /// The per-pixel area coverage between the end of the previous strip (i.e., right-most edge)
+    /// and the start of this strip (i.e., left-most edge).
     ///
-    /// A line that crosses the top edge of a tile increments the delta if the line is directed
-    /// upwards, and decrements it if goes downwards. Horizontal lines leave it unchanged.
-    pub winding: i32,
+    /// If this is the first strip, the area covered is between the viewport's left edge and this
+    /// strip.
+    pub pixel_coverage: [u8; Tile::HEIGHT as usize],
 
     /// The index of the strip into the alpha mask storage.
     pub alpha_idx: u32,
@@ -31,7 +32,6 @@ pub(crate) fn generate_strips(
     alpha_storage: &mut Vec<u8>,
     strips: &mut Vec<Strip>,
 ) {
-    // TODO(Tom): handle the case where the row has a nonzero winding number.
     if row.tiles.is_empty() || lines.is_empty() {
         return;
     }
@@ -48,7 +48,7 @@ pub(crate) fn generate_strips(
     let mut location_winding = [row.area_coverage; Tile::WIDTH as usize];
     // The accumulated (fractional) windings at this location's right edge. When we move to the
     // next location, this is splatted to that location's starting winding.
-    let mut accumulated_winding = [0f32; Tile::HEIGHT as usize];
+    let mut accumulated_winding = row.area_coverage;
 
     let row_top_y = (row_y * Tile::HEIGHT) as f32;
 
@@ -63,7 +63,9 @@ pub(crate) fn generate_strips(
         x: prev_tile.x,
         y: row_y,
         width: 0,
-        winding: 0,
+        pixel_coverage: row
+            .area_coverage
+            .map(|coverage| (coverage.abs() * u8::MAX as f32).round() as u8),
         alpha_idx: alpha_storage.len() as u32,
     };
 
@@ -75,8 +77,6 @@ pub(crate) fn generate_strips(
             for x in 0..Tile::WIDTH as usize {
                 for y in 0..Tile::HEIGHT as usize {
                     // TODO(Tom): even-odd winding.
-                    // TODO(Tom): does this need adjusting for the target color space's
-                    // transfer function?
                     alpha_storage
                         .push((location_winding[x][y].abs() * u8::MAX as f32).round() as u8);
                 }
@@ -87,13 +87,13 @@ pub(crate) fn generate_strips(
         // Push out the strip if we're moving to a next strip.
         if prev_tile.x + 1 < tile.x {
             strip.width = prev_tile.x - strip.x + 1;
-            strip.winding = winding_delta;
             strips.push(strip);
             strip = Strip {
                 x: tile.x,
                 y: row_y,
                 width: 0,
-                winding: 0,
+                pixel_coverage: accumulated_winding
+                    .map(|coverage| (coverage.abs() * u8::MAX as f32).round() as u8),
                 alpha_idx: alpha_storage.len() as u32,
             };
             // Note: this fill is mathematically not necessary. It provides a way to reduce
@@ -142,60 +142,83 @@ pub(crate) fn generate_strips(
             (p1_y, p0_y)
         };
 
-        let y_slope = (line_right_y - line_left_y) / (line_right_x - line_left_x);
+        // Special-case vertical lines for ease of logic in the else-branch.
+        if p0_x == p1_x {
+            winding_delta +=
+                sign as i32 * (line_top_y <= row_top_y && line_bottom_y > row_top_y) as i32;
+            let x_idx = p0_x as u16 - (tile.x * Tile::WIDTH);
+            for y_idx in 0..Tile::HEIGHT {
+                let px_top_y = row_top_y + y_idx as f32;
+                let px_bottom_y = row_top_y + 1. + y_idx as f32;
 
-        let tile_left_y = (line_left_y
-            + (tile.x as f32 * Tile::WIDTH as f32 - line_left_x) * y_slope)
-            .max(line_top_y)
-            .min(line_bottom_y);
-        let tile_right_y = (line_left_y
-            + ((tile.x + 1) as f32 * Tile::WIDTH as f32 - line_left_x) * y_slope)
-            .max(line_top_y)
-            .min(line_bottom_y);
+                let h = (line_bottom_y.min(px_bottom_y) - (line_top_y.max(px_top_y))).max(0.);
 
-        let ymin = f32::min(tile_left_y, tile_right_y);
-        let ymax = f32::max(tile_left_y, tile_right_y);
-        winding_delta += sign as i32 * (ymin <= row_top_y && ymax > row_top_y) as i32;
-
-        // Currently differently parameterized from y_slope.
-        // I feel like there's a smarter order of doing things that would be faster...
-        let x_slope = (p1_x - p0_x) / (p1_y - p0_y);
-        for y_idx in 0..Tile::HEIGHT {
-            let y = row_top_y + y_idx as f32;
-
-            let ymin = line_top_y.max(y).min(y + 1.);
-            let ymax = line_bottom_y.max(y).min(y + 1.);
-
-            let mut y_right = tile_left_y.max(ymin).min(ymax);
-            let mut y_right_x = p0_x + (y_right - p0_y) * x_slope;
-
-            let mut acc = 0.;
-            // // TODO(Tom): reduce operations by taking the previous iteration's `y_right` as the
-            // // current iteration's `y_next`.
-            // // 2025-02-17: It appears not to help in the 4x4 case.
-            // // 2025-02-18: It actually turns out to be every so slightly faster, but ideally more
-            // // principled measurements would be performed.
-            // //
-            // // TODO(Tom): does short-circuiting help? e.g., if both x coordinates are to the
-            // // left of this pixel's right edge, breaking this inner loop?
-            // // 2025-02-17: It appears not to help in the 4x4 case.
-            for x_idx in 0..Tile::WIDTH {
-                let x = (tile.x * Tile::WIDTH + x_idx) as f32;
-
-                let y_left = y_right;
-                y_right = (line_left_y + (x + 1. - line_left_x) * y_slope)
-                    .max(ymin)
-                    .min(ymax);
-
-                let y_left_x = y_right_x;
-                y_right_x = p0_x + (y_right - p0_y) * x_slope;
-
-                let h = (y_left - y_right).abs();
-                let area = 0.5 * h * (x + x + 2. - y_left_x - y_right_x);
-                location_winding[x_idx as usize][y_idx as usize] += acc + sign * area.max(0.);
-                acc += sign * h;
+                location_winding[x_idx as usize][y_idx as usize] += sign * (1. - p0_x.fract()) * h;
+                accumulated_winding[y_idx as usize] += sign * h;
+                for x_idx in x_idx + 1..Tile::WIDTH {
+                    location_winding[x_idx as usize][y_idx as usize] += sign * h;
+                }
             }
-            accumulated_winding[y_idx as usize] += acc;
+        } else {
+            let y_slope = (line_right_y - line_left_y) / (line_right_x - line_left_x);
+            if !y_slope.is_finite() {
+                // The branch above prevents this.
+                unreachable!()
+            }
+
+            let tile_left_y = (line_left_y
+                + (tile.x as f32 * Tile::WIDTH as f32 - line_left_x) * y_slope)
+                .max(line_top_y)
+                .min(line_bottom_y);
+            let tile_right_y = (line_left_y
+                + ((tile.x + 1) as f32 * Tile::WIDTH as f32 - line_left_x) * y_slope)
+                .max(line_top_y)
+                .min(line_bottom_y);
+
+            let ymin = f32::min(tile_left_y, tile_right_y);
+            let ymax = f32::max(tile_left_y, tile_right_y);
+            winding_delta += sign as i32 * (ymin <= row_top_y && ymax > row_top_y) as i32;
+
+            // Currently differently parameterized from y_slope.
+            // I feel like there's a smarter order of doing things that would be faster...
+            let x_slope = (p1_x - p0_x) / (p1_y - p0_y);
+            for y_idx in 0..Tile::HEIGHT {
+                let y = row_top_y + y_idx as f32;
+
+                let ymin = line_top_y.max(y).min(y + 1.);
+                let ymax = line_bottom_y.max(y).min(y + 1.);
+
+                let mut y_right = tile_left_y.max(ymin).min(ymax);
+                let mut y_right_x = p0_x + (y_right - p0_y) * x_slope;
+
+                let mut acc = 0.;
+                // TODO(Tom): reduce operations by taking the previous iteration's `y_right` as the
+                // current iteration's `y_next`.
+                // 2025-02-17: It appears not to help in the 4x4 case.
+                // 2025-02-18: It actually turns out to be every so slightly faster, but ideally more
+                // principled measurements would be performed.
+                //
+                // TODO(Tom): does short-circuiting help? e.g., if both x coordinates are to the
+                // left of this pixel's right edge, breaking this inner loop?
+                // 2025-02-17: It appears not to help in the 4x4 case.
+                for x_idx in 0..Tile::WIDTH {
+                    let x = (tile.x * Tile::WIDTH + x_idx) as f32;
+
+                    let y_left = y_right;
+                    y_right = (line_left_y + (x + 1. - line_left_x) * y_slope)
+                        .max(ymin)
+                        .min(ymax);
+
+                    let y_left_x = y_right_x;
+                    y_right_x = p0_x + (y_right - p0_y) * x_slope;
+
+                    let h = (y_left - y_right).abs();
+                    let area = 0.5 * h * (x + x + 2. - y_left_x - y_right_x);
+                    location_winding[x_idx as usize][y_idx as usize] += acc + sign * area.max(0.);
+                    acc += sign * h;
+                }
+                accumulated_winding[y_idx as usize] += acc;
+            }
         }
     }
 }

@@ -85,50 +85,100 @@ pub(crate) fn generate_tiles(rows: &mut [TileRow], width: u16, lines: &[Line]) {
 
         let sign = (p0_y - p1_y).signum();
 
-        let y_top = f32::min(p0_y, p1_y);
-        let y_bottom = f32::max(p0_y, p1_y);
-        let x_left = f32::min(p0_x, p1_x);
-        let x_right = f32::max(p0_x, p1_x);
+        let (line_left_x, line_left_y, line_right_x, line_right_y) = if p0_x < p1_x {
+            (p0_x, p0_y, p1_x, p1_y)
+        } else {
+            (p1_x, p1_y, p0_x, p0_y)
+        };
+        let (line_top_y, line_bottom_y) = if p0_y < p1_y {
+            (p0_y, p1_y)
+        } else {
+            (p1_y, p0_y)
+        };
+        let y_top_tiles = (line_top_y as u16).min(rows.len().saturating_sub(1) as u16);
+        let y_bottom_tiles = (line_bottom_y as u16).min(rows.len().saturating_sub(1) as u16);
 
-        // The y-coordinate at the line's leftmost point.
-        let x_left_y = if x_left == p0_x { p0_y } else { p1_y };
+        if line_left_x == line_right_x {
+            if line_left_x < 0. {
+                for y_idx in y_top_tiles..=y_bottom_tiles {
+                    let row_top_y = y_idx as f32;
+                    let row = &mut rows[y_idx as usize];
+                    row.winding +=
+                        sign as i32 * (line_top_y <= row_top_y && line_bottom_y > row_top_y) as i32;
 
-        let x_slope = (p1_x - p0_x) / (p1_y - p0_y);
-        let y_slope = (p1_y - p0_y) / (p1_x - p0_x);
-
-        let y_top_tiles = (y_top as u16).min(rows.len() as u16);
-        let y_bottom_tiles = (y_bottom as u16).min(rows.len().saturating_sub(1) as u16);
-
-        for y_idx in y_top_tiles..=y_bottom_tiles {
-            let row = &mut rows[y_idx as usize];
-            let row_y_top = (y_idx as f32).max(y_top).min(y_bottom);
-            let row_y_bottom = ((y_idx + 1) as f32).max(y_top).min(y_bottom);
-
-            if x_left < 0. {
-                // Line's y-coord at the left viewport edge.
-                let viewport_y_left = p0_y - y_slope * p0_x;
-                row.winding +=
-                    sign as i32 * (x_left_y < row_y_top && viewport_y_left >= row_y_top) as i32;
-                for y_px in 0..Tile::HEIGHT {
-                    let px_y_top = row_y_top + (1. / Tile::HEIGHT as f32) * y_px as f32;
-                    let px_y_bottom = row_y_top + (1. / Tile::HEIGHT as f32) * (y_px + 1) as f32;
-                    row.area_coverage[y_px as usize] += Tile::HEIGHT as f32
-                        * sign
-                        * (x_left_y.max(px_y_top).min(px_y_bottom)
-                            - viewport_y_left.max(px_y_top).min(px_y_bottom))
-                        .abs();
+                    for y_px in 0..Tile::HEIGHT {
+                        let px_top_y = y_idx as f32 + y_px as f32 * (1. / Tile::HEIGHT as f32);
+                        let px_bottom_y = y_idx as f32
+                            + y_px as f32 * (1. / Tile::HEIGHT as f32)
+                            + (1. / Tile::HEIGHT as f32);
+                        row.area_coverage[y_px as usize] += Tile::HEIGHT as f32
+                            * sign
+                            * (line_bottom_y.min(px_bottom_y) - line_top_y.max(px_top_y)).max(0.);
+                    }
+                }
+            } else {
+                for y_idx in y_top_tiles..=y_bottom_tiles {
+                    let x_idx = p0_x as u16;
+                    let row = &mut rows[y_idx as usize];
+                    row.tiles.push(Tile { x: x_idx, line_idx });
                 }
             }
+        } else {
+            let x_slope = (p1_x - p0_x) / (p1_y - p0_y);
+            if !x_slope.is_finite() {
+                // TODO: elide horizontal lines.
+                // unreachable!()
+            }
 
-            // The line's x-coordinates at the row's top- and bottom-most points.
-            let row_y_top_x = p0_x + (row_y_top - p0_y) * x_slope;
-            let row_y_bottom_x = p0_x + (row_y_bottom - p0_y) * x_slope;
+            let y_top_tiles = (line_top_y as u16).min(rows.len() as u16);
+            let y_bottom_tiles = (line_bottom_y as u16).min(rows.len().saturating_sub(1) as u16);
 
-            let row_left_x = f32::min(row_y_top_x, row_y_bottom_x).max(x_left);
-            let row_right_x = f32::max(row_y_top_x, row_y_bottom_x).min(x_right);
+            for y_idx in y_top_tiles..=y_bottom_tiles {
+                let row = &mut rows[y_idx as usize];
+                let row_top_y = y_idx as f32;
 
-            for x_idx in row_left_x as u16..(row_right_x as u16 + 1).min(width_in_tiles) {
-                row.tiles.push(Tile { x: x_idx, line_idx });
+                let ymin = line_top_y.max(row_top_y).min(row_top_y + 1.);
+                let ymax = line_bottom_y.max(row_top_y).min(row_top_y + 1.);
+
+                if line_left_x < 0. {
+                    let y_slope = (line_right_y - line_left_y) / (line_right_x - line_left_x);
+                    if !y_slope.is_finite() {
+                        // Prevented by the branch above.
+                        unreachable!()
+                    }
+
+                    // Line's y-coord at the left viewport edge.
+                    let viewport_y_left = (line_left_y - line_left_x * y_slope)
+                        .max(line_top_y)
+                        .min(line_bottom_y);
+                    row.winding += sign as i32
+                        * ((line_left_y - row_top_y).signum()
+                            != (viewport_y_left - row_top_y).signum())
+                            as i32;
+                    for y_px in 0..Tile::HEIGHT {
+                        let px_top_y = y_idx as f32 + y_px as f32 * (1. / Tile::HEIGHT as f32);
+                        let px_bottom_y = y_idx as f32
+                            + y_px as f32 * (1. / Tile::HEIGHT as f32)
+                            + (1. / Tile::HEIGHT as f32);
+                        row.area_coverage[y_px as usize] += Tile::HEIGHT as f32
+                            * sign
+                            * (viewport_y_left.min(px_bottom_y).max(px_top_y)
+                                - line_left_y.min(px_bottom_y).max(px_top_y))
+                            .abs();
+                    }
+                }
+
+                // The line's x-coordinates at the line's top- and bottom-most points within the
+                // row.
+                let row_y_top_x = p0_x + (ymin - p0_y) * x_slope;
+                let row_y_bottom_x = p0_x + (ymax - p0_y) * x_slope;
+
+                let row_left_x = f32::min(row_y_top_x, row_y_bottom_x).max(line_left_x);
+                let row_right_x = f32::max(row_y_top_x, row_y_bottom_x).min(line_right_x);
+
+                for x_idx in row_left_x as u16..(row_right_x as u16 + 1).min(width_in_tiles) {
+                    row.tiles.push(Tile { x: x_idx, line_idx });
+                }
             }
         }
     }

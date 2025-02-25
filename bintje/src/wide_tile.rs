@@ -66,13 +66,7 @@ pub(crate) fn generate_wide_tile_commands<'b>(
     let wide_tile_columns = width.div_ceil(WIDE_TILE_WIDTH_PX);
     let wide_tile_rows = (wide_tiles.len() / wide_tile_columns as usize) as u16;
 
-    let mut prev_strip = Strip {
-        x: 0,
-        y: u16::MAX,
-        width: 0,
-        winding: 0,
-        alpha_idx: 0,
-    };
+    let mut prev_x = 0;
 
     for strip in strips.iter().copied() {
         let wide_tile_x = strip.x / WIDE_TILE_WIDTH_TILES;
@@ -88,11 +82,10 @@ pub(crate) fn generate_wide_tile_commands<'b>(
         };
 
         // Command sparse fills.
-        if prev_strip.winding != 0
-            && prev_strip.y == strip.y
-            && prev_strip.x + prev_strip.width < strip.x + 1
-        {
-            let start_wide_tile_x = (prev_strip.x + prev_strip.width) / WIDE_TILE_WIDTH_TILES;
+        // TODO(Tom): do sparse masked fills (these are currently not generated, as horizontal
+        // geometry is not yet elided)
+        if strip.pixel_coverage == [255; Tile::HEIGHT as usize] && prev_x < strip.x {
+            let start_wide_tile_x = prev_x / WIDE_TILE_WIDTH_TILES;
             let end_wide_tile_x = strip.x / WIDE_TILE_WIDTH_TILES;
             for wide_tile_x in start_wide_tile_x..=end_wide_tile_x {
                 if wide_tile_x >= wide_tile_columns {
@@ -100,7 +93,7 @@ pub(crate) fn generate_wide_tile_commands<'b>(
                 }
 
                 let x_start = if wide_tile_x == start_wide_tile_x {
-                    prev_strip.x + prev_strip.width - start_wide_tile_x * WIDE_TILE_WIDTH_TILES
+                    prev_x - start_wide_tile_x * WIDE_TILE_WIDTH_TILES
                 } else {
                     0
                 };
@@ -158,7 +151,7 @@ pub(crate) fn generate_wide_tile_commands<'b>(
             alpha_idx += width as u32 * Tile::WIDTH as u32 * Tile::HEIGHT as u32;
         }
 
-        prev_strip = strip;
+        prev_x = strip.x + strip.width;
     }
 }
 
