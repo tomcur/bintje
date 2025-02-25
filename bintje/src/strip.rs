@@ -111,10 +111,10 @@ pub(crate) fn generate_strips(
         prev_tile = tile;
 
         let line = lines[tile.line_idx as usize];
-        let p0_x = line.p0.x;
-        let p0_y = line.p0.y;
-        let p1_x = line.p1.x;
-        let p1_y = line.p1.y;
+        let p0_x = line.p0.x - (tile.x * Tile::WIDTH) as f32;
+        let p0_y = line.p0.y - (row_y * Tile::HEIGHT) as f32;
+        let p1_x = line.p1.x - (tile.x * Tile::WIDTH) as f32;
+        let p1_y = line.p1.y - (row_y * Tile::HEIGHT) as f32;
 
         let sign = (p0_y - p1_y).signum();
 
@@ -147,12 +147,11 @@ pub(crate) fn generate_strips(
 
         // Special-case vertical lines for ease of logic in the else-branch.
         if p0_x == p1_x {
-            winding_delta +=
-                sign as i32 * (line_top_y <= row_top_y && line_bottom_y > row_top_y) as i32;
-            let x_idx = p0_x as u16 - (tile.x * Tile::WIDTH);
+            winding_delta += sign as i32 * (line_top_y <= 0. && line_bottom_y > 0.) as i32;
+            let x_idx = p0_x as u16;
             for y_idx in 0..Tile::HEIGHT {
-                let px_top_y = row_top_y + y_idx as f32;
-                let px_bottom_y = row_top_y + 1. + y_idx as f32;
+                let px_top_y = y_idx as f32;
+                let px_bottom_y = y_idx as f32 + 1.;
 
                 let h = (line_bottom_y.min(px_bottom_y) - (line_top_y.max(px_top_y))).max(0.);
 
@@ -169,24 +168,22 @@ pub(crate) fn generate_strips(
                 unreachable!()
             }
 
-            let tile_left_y = (line_left_y
-                + (tile.x as f32 * Tile::WIDTH as f32 - line_left_x) * y_slope)
+            let tile_left_y = (line_left_y - line_left_x * y_slope)
                 .max(line_top_y)
                 .min(line_bottom_y);
-            let tile_right_y = (line_left_y
-                + ((tile.x + 1) as f32 * Tile::WIDTH as f32 - line_left_x) * y_slope)
+            let tile_right_y = (line_left_y + (Tile::WIDTH as f32 - line_left_x) * y_slope)
                 .max(line_top_y)
                 .min(line_bottom_y);
 
             let ymin = f32::min(tile_left_y, tile_right_y);
             let ymax = f32::max(tile_left_y, tile_right_y);
-            winding_delta += sign as i32 * (ymin <= row_top_y && ymax > row_top_y) as i32;
+            winding_delta += sign as i32 * (ymin <= 0. && ymax > 0.) as i32;
 
             // Currently differently parameterized from y_slope.
             // I feel like there's a smarter order of doing things that would be faster...
             let x_slope = (p1_x - p0_x) / (p1_y - p0_y);
             for y_idx in 0..Tile::HEIGHT {
-                let y = row_top_y + y_idx as f32;
+                let y = y_idx as f32;
 
                 let ymin = line_top_y.max(y).min(y + 1.);
                 let ymax = line_bottom_y.max(y).min(y + 1.);
@@ -205,7 +202,7 @@ pub(crate) fn generate_strips(
                 // left of this pixel's right edge, breaking this inner loop?
                 // 2025-02-17: It appears not to help in the 4x4 case.
                 for x_idx in 0..Tile::WIDTH {
-                    let x = (tile.x * Tile::WIDTH + x_idx) as f32;
+                    let x = x_idx as f32;
 
                     let y_left = y_right;
                     y_right = (line_left_y + (x + 1. - line_left_x) * y_slope)
