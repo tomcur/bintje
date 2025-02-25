@@ -291,18 +291,7 @@ impl Bintje {
             let lines: flatten::stroke::LoweredPath<kurbo::Line> =
                 flatten::stroke::stroke_undashed(path, style, 0.25 / self.current_scale);
 
-            let mut prev_line: Option<kurbo::Line> = None;
-            for (idx, mut line) in lines.path.into_iter().enumerate() {
-                if idx > 0 {
-                    // TODO: there appear to be some watertightness issues in `flatten`, this works
-                    // around that, but could have false-positives and may introduce watertightness
-                    // issues by itself.
-                    let p1 = prev_line.unwrap().p1;
-                    if (line.p0 - p1).hypot2() < 0.2 {
-                        line.p0 = prev_line.unwrap().p1;
-                    }
-                }
-                prev_line = Some(line);
+            for line in lines.path.into_iter() {
                 self.lines
                     .push(Line::from_kurbo(self.current_transform * line));
             }
