@@ -70,6 +70,7 @@ pub(crate) fn generate_wide_tile_commands<'b>(
     width: u16,
     wide_tiles: &mut [WideTile],
     strips: &[Strip],
+    alpha_masks: &[u8],
     brush: impl Into<peniko::BrushRef<'b>>,
 ) {
     let brush = brush.into();
@@ -156,18 +157,38 @@ pub(crate) fn generate_wide_tile_commands<'b>(
             } else {
                 WIDE_TILE_WIDTH_TILES
             };
-            let width = x_end - x_start;
 
             let wide_tile = wide_tiles
                 .get_mut((wide_tile_y * wide_tile_columns + wide_tile_x) as usize)
                 .unwrap();
 
-            wide_tile.commands.push(Command::Sample(Sample {
-                x: x_start,
-                width: x_end - x_start,
-                color: color.premultiply().to_rgba8(),
-                alpha_idx,
-            }));
+            let width = x_end - x_start;
+            if !alpha_masks[alpha_idx as usize
+                ..alpha_idx as usize
+                    + width as usize * Tile::HEIGHT as usize * Tile::WIDTH as usize]
+                .iter()
+                .all(|a| *a == 0)
+            {
+                if alpha_masks[alpha_idx as usize
+                    ..alpha_idx as usize
+                        + width as usize * Tile::HEIGHT as usize * Tile::WIDTH as usize]
+                    .iter()
+                    .all(|a| *a == 0)
+                {
+                    wide_tile.commands.push(Command::SparseFill(SparseFill {
+                        x: x_start,
+                        width,
+                        color: color.premultiply().to_rgba8(),
+                    }));
+                } else {
+                    wide_tile.commands.push(Command::Sample(Sample {
+                        x: x_start,
+                        width,
+                        color: color.premultiply().to_rgba8(),
+                        alpha_idx,
+                    }));
+                }
+            }
             alpha_idx += width as u32 * Tile::WIDTH as u32 * Tile::HEIGHT as u32;
         }
 

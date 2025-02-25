@@ -198,6 +198,7 @@ impl Bintje {
             self.width,
             &mut self.wide_tiles,
             &self.strips,
+            &self.alpha_masks,
             brush,
         );
     }
