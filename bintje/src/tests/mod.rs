@@ -139,3 +139,20 @@ fn composite() {
     );
     env.rasterize_to_png();
 }
+
+#[test]
+fn overflow_left_viewport() {
+    let mut env = testenv!();
+    env.set_size(64, 64);
+
+    let renderer = env.renderer();
+    renderer.stroke(
+        kurbo::Rect::new(-0.5, 5.5, 50.5, 40.5).path_elements(f64::NAN),
+        &kurbo::Stroke {
+            width: 1.0,
+            ..kurbo::Stroke::default()
+        },
+        color::palette::css::ORANGE_RED,
+    );
+    env.rasterize_to_png();
+}
