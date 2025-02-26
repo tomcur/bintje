@@ -194,8 +194,7 @@ pub(crate) fn generate_strips(
                 let line_px_left_yx = line_top_x + (line_px_left_y - line_top_y) * x_slope;
                 let line_px_right_yx = line_top_x + (line_px_right_y - line_top_y) * x_slope;
                 let h = (line_px_right_y - line_px_left_y).abs();
-                let area =
-                    0.5 * h * ((px_right_x - line_px_right_yx) + (px_right_x - line_px_left_yx));
+                let area = 0.5 * h * (2. * px_right_x - line_px_right_yx - line_px_left_yx);
                 location_winding[x_idx as usize][y_idx as usize] += acc + sign * area;
                 acc += sign * h;
             }
