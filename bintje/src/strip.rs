@@ -173,7 +173,7 @@ pub(crate) fn generate_strips(
                 let px_right_x = 1. + x_idx as f32;
 
                 // The y-coordinate of the intersections between line and the pixel's left and
-                // right edge's respectively.
+                // right edges respectively.
                 //
                 // There is some subtlety going on here: `y_slope` will usually be finite, but will
                 // be `inf` for purely vertical lines (`p0_x == p1_x`).
