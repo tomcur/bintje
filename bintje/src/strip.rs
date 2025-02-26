@@ -24,7 +24,6 @@ pub struct Strip {
 }
 
 /// `tiles` must be in (y, x) sorted order.
-#[inline(never)]
 pub(crate) fn generate_strips(
     row: &TileRow,
     row_y: u16,
