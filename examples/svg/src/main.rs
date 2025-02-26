@@ -76,16 +76,16 @@ pub fn main() {
         renderer.flattening_stroke_time.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
     );
     println!(
-        " - Stripping elapsed:           {:?}ms",
-        renderer.strip_generation_time.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
-    );
-    println!(
         " - Tile generation elapsed:     {:?}ms",
         renderer.tile_generation_time.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
     );
     println!(
         " - Tile sorting elapsed:        {:?}ms",
         renderer.tile_sorting_time.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
+    );
+    println!(
+        " - Strip generation elapsed:    {:?}ms",
+        renderer.strip_generation_time.as_nanos() as f32 / (NUM_ITERATIONS as f32 * 1_000_000.)
     );
     println!(
         "Fine elapsed:                   {:?}ms",
