@@ -110,11 +110,13 @@ pub(crate) fn generate_strips(
         }
         prev_tile = tile;
 
+        let tile_left_x = (tile.x * Tile::WIDTH) as f32;
+
         let line = lines[tile.line_idx as usize];
-        let p0_x = line.p0.x - (tile.x * Tile::WIDTH) as f32;
-        let p0_y = line.p0.y - (row_y * Tile::HEIGHT) as f32;
-        let p1_x = line.p1.x - (tile.x * Tile::WIDTH) as f32;
-        let p1_y = line.p1.y - (row_y * Tile::HEIGHT) as f32;
+        let p0_x = line.p0.x - tile_left_x;
+        let p0_y = line.p0.y - row_top_y;
+        let p1_x = line.p1.x - tile_left_x;
+        let p1_y = line.p1.y - row_top_y;
 
         let sign = (p0_y - p1_y).signum();
 
@@ -134,91 +136,71 @@ pub(crate) fn generate_strips(
         // pixel's area coverage. For lines directed upwards, the area is positive, and
         // negative for lines direct downwards.
 
-        let (line_left_x, line_left_y, line_right_x, line_right_y) = if p0_x < p1_x {
-            (p0_x, p0_y, p1_x, p1_y)
+        let (line_top_y, line_top_x, line_bottom_y, line_bottom_x) = if p0_y < p1_y {
+            (p0_y, p0_x, p1_y, p1_x)
         } else {
-            (p1_x, p1_y, p0_x, p0_y)
-        };
-        let (line_top_y, line_bottom_y) = if p0_y < p1_y {
-            (p0_y, p1_y)
-        } else {
-            (p1_y, p0_y)
+            (p1_y, p1_x, p0_y, p0_x)
         };
 
-        // Special-case vertical lines for ease of logic in the else-branch.
-        if p0_x == p1_x {
-            winding_delta += sign as i32 * (line_top_y <= 0. && line_bottom_y > 0.) as i32;
-            let x_idx = p0_x as u16;
-            for y_idx in 0..Tile::HEIGHT {
-                let px_top_y = y_idx as f32;
-                let px_bottom_y = y_idx as f32 + 1.;
+        let y_slope = (line_bottom_y - line_top_y) / (line_bottom_x - line_top_x);
+        let x_slope = 1. / y_slope;
 
-                let h = (line_bottom_y.min(px_bottom_y) - (line_top_y.max(px_top_y))).max(0.);
-
-                location_winding[x_idx as usize][y_idx as usize] += sign * (1. - p0_x.fract()) * h;
-                accumulated_winding[y_idx as usize] += sign * h;
-                for x_idx in x_idx + 1..Tile::WIDTH {
-                    location_winding[x_idx as usize][y_idx as usize] += sign * h;
-                }
-            }
-        } else {
-            let y_slope = (line_right_y - line_left_y) / (line_right_x - line_left_x);
-            if !y_slope.is_finite() {
-                // The branch above prevents this.
-                unreachable!()
-            }
-
-            let tile_left_y = (line_left_y - line_left_x * y_slope)
+        {
+            // The y-coordinate of the intersections between line and the tile's left and right
+            // edges respectively.
+            //
+            // There's some subtety goin on here, see the note on `line_px_left_y` below.
+            let line_tile_left_y = (line_top_y - line_top_x * y_slope)
                 .max(line_top_y)
                 .min(line_bottom_y);
-            let tile_right_y = (line_left_y + (Tile::WIDTH as f32 - line_left_x) * y_slope)
+            let line_tile_right_y = (line_top_y + (Tile::WIDTH as f32 - line_top_x) * y_slope)
                 .max(line_top_y)
                 .min(line_bottom_y);
 
-            let ymin = f32::min(tile_left_y, tile_right_y);
-            let ymax = f32::max(tile_left_y, tile_right_y);
-            winding_delta += sign as i32 * (ymin <= 0. && ymax > 0.) as i32;
+            winding_delta +=
+                sign as i32 * (line_tile_left_y.signum() != line_tile_right_y.signum()) as i32;
+        }
 
-            // Currently differently parameterized from y_slope.
-            // I feel like there's a smarter order of doing things that would be faster...
-            let x_slope = (p1_x - p0_x) / (p1_y - p0_y);
-            for y_idx in 0..Tile::HEIGHT {
-                let y = y_idx as f32;
+        for y_idx in 0..Tile::HEIGHT {
+            let px_top_y = y_idx as f32;
+            let px_bottom_y = 1. + y_idx as f32;
 
-                let ymin = line_top_y.max(y).min(y + 1.);
-                let ymax = line_bottom_y.max(y).min(y + 1.);
+            let ymin = f32::max(line_top_y, px_top_y);
+            let ymax = f32::min(line_bottom_y, px_bottom_y);
 
-                let mut y_right = tile_left_y.max(ymin).min(ymax);
-                let mut y_right_x = p0_x + (y_right - p0_y) * x_slope;
+            let mut acc = 0.;
+            for x_idx in 0..Tile::WIDTH {
+                let px_left_x = x_idx as f32;
+                let px_right_x = 1. + x_idx as f32;
 
-                let mut acc = 0.;
-                // TODO(Tom): reduce operations by taking the previous iteration's `y_right` as the
-                // current iteration's `y_next`.
-                // 2025-02-17: It appears not to help in the 4x4 case.
-                // 2025-02-18: It actually turns out to be every so slightly faster, but ideally more
-                // principled measurements would be performed.
+                // The y-coordinate of the intersections between line and the pixel's left and
+                // right edge's respectively.
                 //
-                // TODO(Tom): does short-circuiting help? e.g., if both x coordinates are to the
-                // left of this pixel's right edge, breaking this inner loop?
-                // 2025-02-17: It appears not to help in the 4x4 case.
-                for x_idx in 0..Tile::WIDTH {
-                    let x = x_idx as f32;
+                // There is some subtlety going on here: `y_slope` will usually be finite, but will
+                // be `inf` for purely vertical lines (`p0_x == p1_x`).
+                //
+                // In the case of `inf`, the resulting slope calculation will be `-inf` or `inf`
+                // depending on whether the pixel edge is left or right of the line, respectively
+                // (from the viewport's coordinate system perspective). The `min` and `max`
+                // y-clamping logic generalizes nicely, as a pixel edge to the left of the line is
+                // clamped to `ymin`, and a pixel edge to the right is clamped to `ymax`.
+                let line_px_left_y = (line_top_y + (px_left_x - line_top_x) * y_slope)
+                    .max(ymin)
+                    .min(ymax);
+                let line_px_right_y = (line_top_y + (px_right_x - line_top_x) * y_slope)
+                    .max(ymin)
+                    .min(ymax);
 
-                    let y_left = y_right;
-                    y_right = (line_left_y + (x + 1. - line_left_x) * y_slope)
-                        .max(ymin)
-                        .min(ymax);
-
-                    let y_left_x = y_right_x;
-                    y_right_x = p0_x + (y_right - p0_y) * x_slope;
-
-                    let h = (y_left - y_right).abs();
-                    let area = 0.5 * h * (x + x + 2. - y_left_x - y_right_x);
-                    location_winding[x_idx as usize][y_idx as usize] += acc + sign * area.max(0.);
-                    acc += sign * h;
-                }
-                accumulated_winding[y_idx as usize] += acc;
+                // `x_slope` is always finite, as horizontal geometry is elided.
+                let line_px_left_yx = line_top_x + (line_px_left_y - line_top_y) * x_slope;
+                let line_px_right_yx = line_top_x + (line_px_right_y - line_top_y) * x_slope;
+                let h = (line_px_right_y - line_px_left_y).abs();
+                let area =
+                    0.5 * h * ((px_right_x - line_px_right_yx) + (px_right_x - line_px_left_yx));
+                location_winding[x_idx as usize][y_idx as usize] += acc + sign * area;
+                acc += sign * h;
             }
+            accumulated_winding[y_idx as usize] += acc;
         }
     }
 }
